@@ -36,6 +36,7 @@
 
 ```
 SkillBridge/
+├── SkillBridge.bat        # 双击即同步（日常用法）
 ├── sync-skills.ps1        # Windows 同步脚本（junction）
 ├── sync-skills.sh         # Unix 同步脚本（symlink）
 ├── install-autolink.ps1   # Windows：注册计划任务
@@ -48,13 +49,17 @@ SkillBridge/
 
 ## 快速开始（Windows）
 
+**日常用法：直接双击 `SkillBridge.bat`**，它会立即把 CC Switch 的全部 skill 链接到所有已配置工具。
+
+首次安装（一次性）：
+
 ```powershell
-# 1. 配置：编辑 config.json 里的 targets（默认已含 ZCode / WorkBuddy / Comate）
+# 1. 配置：编辑 config.json 里的 targets（增删要同步的工具）
 
 # 2. 手动同步一次（建好当前所有 skill 的链接）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-skills.ps1
 
-# 3. 注册"登录时自动补链"计划任务（可选参数 -IntervalMinutes 30 开启周期模式）
+# 3.（可选）注册"登录时自动补链"计划任务（-IntervalMinutes 30 开启周期模式）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-autolink.ps1
 ```
 
@@ -73,11 +78,22 @@ chmod +x sync-skills.sh install-autolink.sh
   "link_type": "junction",
   "source": "%USERPROFILE%\\.cc-switch\\skills",
   "targets": {
-    "ZCode":     "%USERPROFILE%\\.zcode\\skills",
-    "WorkBuddy": "%USERPROFILE%\\.workbuddy\\skills",
-    "Comate":    "%USERPROFILE%\\.comate\\skills",
-    "Codex":     "%USERPROFILE%\\.codex\\skills",
-    "GeminiCLI": "%USERPROFILE%\\.gemini\\config\\skills"
+    "ZCode":          "%USERPROFILE%\\.zcode\\skills",
+    "WorkBuddy":      "%USERPROFILE%\\.workbuddy\\skills",
+    "WorkBuddy AI":   "%USERPROFILE%\\.workbuddy-ai\\skills",
+    "Comate":         "%USERPROFILE%\\.comate\\skills",
+    "TRAE Work CN":   "%USERPROFILE%\\.trae-cn\\skills",
+    "Cherry Studio":  "%APPDATA%\\CherryStudio\\Data\\Skills",
+    "CodeBuddy CN":   "%USERPROFILE%\\.codebuddycn\\skills",
+    "DeepSeek Harness": "%USERPROFILE%\\.agents\\skills",
+    "AutoClaw":       "%USERPROFILE%\\.openclaw-autoclaw\\skills",
+    "Verdent":        "%USERPROFILE%\\.verdent\\skills",
+    "Coze":           "%USERPROFILE%\\.coze\\skills",
+    "Qoder CN":       "%USERPROFILE%\\.qoder-cn\\skills",
+    "Doubao":         "%USERPROFILE%\\DoubaoWork\\skills",
+    "MiniMax Code":   "%USERPROFILE%\\.minimax\\skills",
+    "Qwen Office":    "%USERPROFILE%\\.qwenworkcn\\skills",
+    "Grok Bot":       "%USERPROFILE%\\.grok\\skills"
   },
   "autolink": {
     "enabled": true,
@@ -88,10 +104,10 @@ chmod +x sync-skills.sh install-autolink.sh
 ```
 
 - `source`：CC Switch 技能库路径。Windows 上默认 `%USERPROFILE%\.cc-switch\skills`，Unix 上默认 `$HOME/.cc-switch/skills`。
-- `targets`：`名称 → 技能目录` 的映射。想接入新工具，在这里加一行即可；`%USERPROFILE%`（Windows）/ `$HOME`（Unix）会被自动展开。
+- `targets`：`名称 → 技能目录` 的映射。想接入新工具，在这里加一行即可；`%USERPROFILE%`、`%APPDATA%`（Windows）/ `$HOME`（Unix）会被自动展开。
 - `link_type`：`junction`（Windows 目录联接，无需管理员权限）/ `symlink`（Unix）。
 
-> 提示：Codex、Gemini CLI 等如果已在 CC Switch 界面里启用，CC Switch 自己会同步；本项目的 targets 只是"额外再加一层"，重复了也无害。
+> 提示：如果某工具的技能目录实际路径不同，直接把 `targets` 里对应行的目录改成工具真正读取的位置即可。
 
 ## 常见问题
 

@@ -1,11 +1,24 @@
 {
-  "$comment": "CC Switch Skill Sync — target tools and their global skills dirs. %USERPROFILE% (Windows) / $HOME (Unix) are expanded automatically.",
+  "$comment": "SkillBridge — target tools and their global skills dirs. %USERPROFILE% / %APPDATA% (Windows) and $HOME (Unix) are expanded automatically.",
   "link_type": "junction",
   "source": "%USERPROFILE%\\.cc-switch\\skills",
   "targets": {
     "ZCode": "%USERPROFILE%\\.zcode\\skills",
     "WorkBuddy": "%USERPROFILE%\\.workbuddy\\skills",
-    "Comate": "%USERPROFILE%\\.comate\\skills"
+    "WorkBuddy AI": "%USERPROFILE%\\.workbuddy-ai\\skills",
+    "Comate": "%USERPROFILE%\\.comate\\skills",
+    "TRAE Work CN": "%USERPROFILE%\\.trae-cn\\skills",
+    "Cherry Studio": "%APPDATA%\\CherryStudio\\Data\\Skills",
+    "CodeBuddy CN": "%USERPROFILE%\\.codebuddycn\\skills",
+    "DeepSeek Harness": "%USERPROFILE%\\.agents\\skills",
+    "AutoClaw": "%USERPROFILE%\\.openclaw-autoclaw\\skills",
+    "Verdent": "%USERPROFILE%\\.verdent\\skills",
+    "Coze": "%USERPROFILE%\\.coze\\skills",
+    "Qoder CN": "%USERPROFILE%\\.qoder-cn\\skills",
+    "Doubao": "%USERPROFILE%\\DoubaoWork\\skills",
+    "MiniMax Code": "%USERPROFILE%\\.minimax\\skills",
+    "Qwen Office": "%USERPROFILE%\\.qwenworkcn\\skills",
+    "Grok Bot": "%USERPROFILE%\\.grok\\skills"
   },
   "autolink": {
     "enabled": true,

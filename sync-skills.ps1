@@ -22,7 +22,16 @@ $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
 function Expand-UserPath {
     param([string]$Path)
     $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
-    return $Path.Replace('%USERPROFILE%', $homeDir).Replace('$HOME', $homeDir)
+    $envVars = @{
+        '%USERPROFILE%'  = $homeDir
+        '$HOME'          = $homeDir
+        '%APPDATA%'      = $env:APPDATA
+        '%LOCALAPPDATA%' = $env:LOCALAPPDATA
+    }
+    foreach ($k in $envVars.Keys) {
+        if ($envVars[$k]) { $Path = $Path.Replace($k, $envVars[$k]) }
+    }
+    return $Path
 }
 
 $src  = Expand-UserPath $config.source
