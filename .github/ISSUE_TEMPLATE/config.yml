@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Supported tools list
+    url: ../../blob/main/支持的软件列表.md
+    about: Check the list of supported tools and their default skill paths before opening a bug.

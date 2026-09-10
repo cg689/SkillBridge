@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a problem with SkillBridge
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in as much as you can.
+  - type: input
+    id: os
+    attributes:
+      label: Operating system / shell
+      description: e.g. Windows 11 + PowerShell 5.1, macOS 14 + zsh
+    validations:
+      required: true
+  - type: input
+    id: script
+    attributes:
+      label: Which script
+      description: sync-skills.ps1 / sync-skills.sh / detect-tools.ps1 / install-autolink.* / 同步CCSwitch技能.bat
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Set up config.json with ...
+        2. Run ...
+        3. See error ...
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output / error
+      render: shell
+  - type: input
+    id: tool
+    attributes:
+      label: Affected tool (if any)
+      description: e.g. ZCode, Hermes Agent, Cherry Studio

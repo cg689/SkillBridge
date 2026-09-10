@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate-json:
+    name: Validate JSON config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Validate config files
+        run: |
+          python - <<'EOF'
+          import json
+          for f in ("config.json", "config.example.json"):
+              with open(f, encoding="utf-8") as fh:
+                  json.load(fh)
+              print(f"{f}: OK")
+          EOF
+
+  powershell:
+    name: Lint PowerShell scripts
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse-check all .ps1 files
+        shell: pwsh
+        run: |
+          $errs = $null
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs)
+            if ($errs.Count) { Write-Error "$($_.Name): $($errs -join '; ')" }
+          }
+          Write-Host "All PowerShell files parse OK"
+
+  shell:
+    name: Lint shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check (bash -n)
+        run: |
+          bash -n sync-skills.sh
+          bash -n install-autolink.sh
+          echo "Bash syntax OK"
+      - name: Shellcheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: '.'
+          severity: warning
