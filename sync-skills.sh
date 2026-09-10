@@ -19,16 +19,30 @@ fi
 
 HOME_DIR="${HOME}"
 
+# Expand %VAR% (Windows-style, e.g. %USERPROFILE%/%APPDATA%/%HERMES_HOME%) and $HOME
+# into a path usable on this Unix machine.
 read_targets() {
-    python3 - "$CONFIG" "$HOME_DIR" <<'PY'
-import json, sys
+    python3 - "$CONFIG" <<'PY'
+import json, sys, os
 cfg = json.load(open(sys.argv[1]))
+def norm(v):
+    v = v.replace("%USERPROFILE%", os.path.expanduser("~"))
+    v = v.replace("%APPDATA%", os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")))
+    v = v.replace("%LOCALAPPDATA%", os.path.expanduser("~/.local/share"))
+    return os.path.expandvars(v)
 for v in cfg.get("targets", {}).values():
-    print(v.replace("%USERPROFILE%", sys.argv[2]).replace("$HOME", sys.argv[2]))
+    print(norm(v))
 PY
 }
 
-SRC="$(python3 -c "import json,sys;c=json.load(open('$CONFIG'));print(c['source'].replace('%USERPROFILE%',sys.argv[1]).replace('\$HOME',sys.argv[1]))" "$HOME_DIR" 2>/dev/null || echo "$HOME_DIR/.cc-switch/skills")"
+SRC="$(python3 - "$CONFIG" <<'PY' 2>/dev/null || echo "$HOME/.cc-switch/skills"
+import json, sys, os
+cfg = json.load(open(sys.argv[1]))
+v = cfg["source"]
+v = v.replace("%USERPROFILE%", os.path.expanduser("~"))
+print(os.path.expandvars(v))
+PY
+)"
 
 mkdir -p "$SRC"
 created=0

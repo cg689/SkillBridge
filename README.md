@@ -37,14 +37,16 @@
 ```
 SkillBridge/
 ├── 同步CCSwitch技能.bat    # 双击即同步（日常用法）
-├── sync-skills.ps1        # Windows 同步脚本（junction）
-├── sync-skills.sh         # Unix 同步脚本（symlink）
-├── install-autolink.ps1   # Windows：注册计划任务
-├── install-autolink.sh    # Unix：注册 launchd / crontab
-├── config.json            # 目标工具配置（可增删）
-├── 支持的软件列表.md        # 当前支持的应用与技能目录清单
+├── detect-tools.ps1        # 自动探测本机已装工具并生成 config.json（适配新电脑）
+├── sync-skills.ps1         # Windows 同步脚本（junction）
+├── sync-skills.sh          # Unix 同步脚本（symlink）
+├── install-autolink.ps1    # Windows：注册计划任务
+├── install-autolink.sh     # Unix：注册 launchd / crontab
+├── config.json             # 目标工具配置（可增删）
+├── config.example.json     # 可移植配置示例（基于环境变量）
+├── 支持的软件列表.md         # 当前支持的应用与技能目录清单
 ├── README.md
-├── LICENSE                # MIT
+├── LICENSE                 # MIT
 └── .gitignore
 ```
 
@@ -105,10 +107,25 @@ chmod +x sync-skills.sh install-autolink.sh
 ```
 
 - `source`：CC Switch 技能库路径。Windows 上默认 `%USERPROFILE%\.cc-switch\skills`，Unix 上默认 `$HOME/.cc-switch/skills`。
-- `targets`：`名称 → 技能目录` 的映射。想接入新工具，在这里加一行即可；`%USERPROFILE%`、`%APPDATA%`（Windows）/ `$HOME`（Unix）会被自动展开。
+- `targets`：`名称 → 技能目录` 的映射。想接入新工具，在这里加一行即可；`%USERPROFILE%`、`%APPDATA%`、`%HERMES_HOME%`（Windows）/ `$HOME`（Unix）会被自动展开。
 - `link_type`：`junction`（Windows 目录联接，无需管理员权限）/ `symlink`（Unix）。
 
 > 提示：如果某工具的技能目录实际路径不同，直接把 `targets` 里对应行的目录改成工具真正读取的位置即可。
+
+## 在其他电脑上使用（适配/迁移）
+
+所有路径都基于**环境变量**（`%USERPROFILE%` / `%APPDATA%` / `%HERMES_HOME%`），不写死任何用户名或盘符，因此可以原样搬到别的电脑：
+
+1. **复制整个 SkillBridge 文件夹**到新电脑（或 `git clone`）。
+2. **Hermes Agent**：如果要用，把环境变量 `HERMES_HOME` 设成它的数据目录（该目录下需有 `skills` 文件夹）。
+3. **自动探测**：运行 `detect-tools.ps1`，它会检查本机装了哪些支持的软件，自动生成只含这些软件的 `config.json`（想全部纳入用 `-All` 参数）：
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\detect-tools.ps1
+   ```
+4. **同步**：双击 `同步CCSwitch技能.bat`（或运行 `sync-skills.ps1`）。
+5. （可选）注册登录自动补链：`install-autolink.ps1`。
+
+macOS / Linux 同理：`sync-skills.sh` 会自动把 `%USERPROFILE%` 映射到 `$HOME`、`%APPDATA%` 映射到 `~/.config`。
 
 ## 常见问题
 

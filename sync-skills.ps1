@@ -19,22 +19,17 @@ if (-not (Test-Path $ConfigPath)) {
 }
 $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
 
-function Expand-UserPath {
+function Expand-EnvPath {
     param([string]$Path)
-    $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
-    $envVars = @{
-        '%USERPROFILE%'  = $homeDir
-        '$HOME'          = $homeDir
-        '%APPDATA%'      = $env:APPDATA
-        '%LOCALAPPDATA%' = $env:LOCALAPPDATA
+    # Windows: expand any %VAR% (USERPROFILE/APPDATA/HERMES_HOME/...) from the real environment
+    if ($env:OS -eq 'Windows_NT') {
+        return [Environment]::ExpandEnvironmentVariables($Path)
     }
-    foreach ($k in $envVars.Keys) {
-        if ($envVars[$k]) { $Path = $Path.Replace($k, $envVars[$k]) }
-    }
-    return $Path
+    # Unix: expand $HOME
+    return $Path.Replace('$HOME', $HOME)
 }
 
-$src  = Expand-UserPath $config.source
+$src  = Expand-EnvPath $config.source
 $log  = Join-Path $PSScriptRoot 'sync-skills.log'
 
 $skills = Get-ChildItem -Path $src -Directory -ErrorAction SilentlyContinue |
@@ -46,7 +41,7 @@ $skipped = 0
 
 foreach ($entry in $config.targets.PSObject.Properties) {
     $tool = $entry.Name
-    $tdir = Expand-UserPath ([string]$entry.Value)
+    $tdir = Expand-EnvPath ([string]$entry.Value)
     if (-not (Test-Path $tdir)) {
         New-Item -ItemType Directory -Path $tdir -Force | Out-Null
     }

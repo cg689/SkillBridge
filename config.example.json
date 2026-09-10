@@ -1,0 +1,18 @@
+{
+  "$comment": "SkillBridge — portable example. All paths use environment variables, so they resolve on ANY machine. Copy to config.json and adjust, or run detect-tools.ps1 to generate a config matching this machine automatically.",
+  "link_type": "junction",
+  "source": "%USERPROFILE%\\.cc-switch\\skills",
+  "targets": {
+    "ZCode": "%USERPROFILE%\\.zcode\\skills",
+    "WorkBuddy": "%USERPROFILE%\\.workbuddy\\skills",
+    "Comate": "%USERPROFILE%\\.comate\\skills",
+    "Hermes Agent": "%HERMES_HOME%\\skills",
+    "TRAE Work CN": "%USERPROFILE%\\.trae-cn\\skills",
+    "Cherry Studio": "%APPDATA%\\CherryStudio\\Data\\Skills"
+  },
+  "autolink": {
+    "enabled": true,
+    "at_logon": true,
+    "interval_minutes": 0
+  }
+}
