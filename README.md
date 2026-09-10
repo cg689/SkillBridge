@@ -42,6 +42,7 @@ SkillBridge/
 ├── install-autolink.ps1   # Windows：注册计划任务
 ├── install-autolink.sh    # Unix：注册 launchd / crontab
 ├── config.json            # 目标工具配置（可增删）
+├── 支持的软件列表.md        # 当前支持的应用与技能目录清单
 ├── README.md
 ├── LICENSE                # MIT
 └── .gitignore
