@@ -36,7 +36,7 @@
 
 ```
 SkillBridge/
-├── SkillBridge.bat        # 双击即同步（日常用法）
+├── 同步CCSwitch技能.bat    # 双击即同步（日常用法）
 ├── sync-skills.ps1        # Windows 同步脚本（junction）
 ├── sync-skills.sh         # Unix 同步脚本（symlink）
 ├── install-autolink.ps1   # Windows：注册计划任务
@@ -49,7 +49,7 @@ SkillBridge/
 
 ## 快速开始（Windows）
 
-**日常用法：直接双击 `SkillBridge.bat`**，它会立即把 CC Switch 的全部 skill 链接到所有已配置工具。
+**日常用法：直接双击 `同步CCSwitch技能.bat`**，它会立即把 CC Switch 的全部 skill 链接到所有已配置工具。
 
 首次安装（一次性）：
 
