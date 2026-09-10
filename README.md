@@ -82,6 +82,7 @@ chmod +x sync-skills.sh install-autolink.sh
     "WorkBuddy":      "%USERPROFILE%\\.workbuddy\\skills",
     "WorkBuddy AI":   "%USERPROFILE%\\.workbuddy-ai\\skills",
     "Comate":         "%USERPROFILE%\\.comate\\skills",
+    "Hermes Agent":   "D:\\Software\\HermesData\\skills",
     "TRAE Work CN":   "%USERPROFILE%\\.trae-cn\\skills",
     "Cherry Studio":  "%APPDATA%\\CherryStudio\\Data\\Skills",
     "CodeBuddy CN":   "%USERPROFILE%\\.codebuddy\\skills",
