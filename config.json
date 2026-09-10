@@ -1,0 +1,15 @@
+{
+  "$comment": "CC Switch Skill Sync — target tools and their global skills dirs. %USERPROFILE% (Windows) / $HOME (Unix) are expanded automatically.",
+  "link_type": "junction",
+  "source": "%USERPROFILE%\\.cc-switch\\skills",
+  "targets": {
+    "ZCode": "%USERPROFILE%\\.zcode\\skills",
+    "WorkBuddy": "%USERPROFILE%\\.workbuddy\\skills",
+    "Comate": "%USERPROFILE%\\.comate\\skills"
+  },
+  "autolink": {
+    "enabled": true,
+    "at_logon": true,
+    "interval_minutes": 0
+  }
+}
