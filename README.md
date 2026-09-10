@@ -1,4 +1,4 @@
-# CC Switch Skill Sync
+# SkillBridge — CC Switch Skill Sync
 
 把 **CC Switch**（`~/.cc-switch/skills`）里的全部 Agent Skill 自动同步到 ZCode / WorkBuddy / Comate 等其他编程工具。
 
@@ -35,7 +35,7 @@
 ## 目录结构
 
 ```
-cc-switch-skill-sync/
+SkillBridge/
 ├── sync-skills.ps1        # Windows 同步脚本（junction）
 ├── sync-skills.sh         # Unix 同步脚本（symlink）
 ├── install-autolink.ps1   # Windows：注册计划任务
