@@ -8,12 +8,14 @@
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-autolink.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-autolink.ps1 -IntervalMinutes 10
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-autolink.ps1 -DryRun   # preview only, no registration
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-autolink.ps1 -Unregister
 param(
     [string]$TaskName   = 'CCSwitch Skills AutoLink',
     [string]$ScriptPath = (Join-Path $PSScriptRoot 'sync-skills.ps1'),
     [int]$IntervalMinutes = -1,
-    [switch]$Unregister
+    [switch]$Unregister,
+    [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
 
@@ -67,6 +69,16 @@ if ($atLogon) {
 }
 
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+
+if ($DryRun) {
+    Write-Host "[DRY-RUN] would register scheduled task '$TaskName':"
+    Write-Host "  action    : powershell.exe $argument"
+    $triggerDesc = if ($atLogon) { 'at logon' } else { 'interval only' }
+    if ($IntervalMinutes -gt 0) { $triggerDesc += " + every $IntervalMinutes min" }
+    Write-Host "  trigger   : $triggerDesc"
+    Write-Host "  principal : $env:USERDOMAIN\$env:USERNAME (Interactive, Limited)"
+    exit 0
+}
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
 

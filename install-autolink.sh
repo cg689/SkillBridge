@@ -9,6 +9,7 @@
 # Usage:
 #   ./install-autolink.sh                # config defaults
 #   ./install-autolink.sh --interval 30  # override interval (minutes)
+#   ./install-autolink.sh --dry-run      # preview only, no registration
 #   ./install-autolink.sh --uninstall
 set -u
 
@@ -20,6 +21,7 @@ INTERVAL_MIN="${INTERVAL_MIN:-}"
 while [ $# -gt 0 ]; do
     case "$1" in
         --interval) INTERVAL_MIN="${2:-0}"; shift 2 ;;
+        --dry-run) DRY_RUN=1; shift ;;
         --uninstall)
             if [ "$(uname)" = "Darwin" ]; then
                 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
@@ -59,6 +61,20 @@ INTERVAL_MIN="${INTERVAL_MIN:-0}"
 if [ "$AT_LOGON" = "False" ] && [ "$INTERVAL_MIN" -le 0 ]; then
     echo "[ERROR] nothing to schedule: at_logon=false and interval_minutes=0." >&2
     exit 1
+fi
+
+if [ "${DRY_RUN:-0}" = "1" ]; then
+    echo "[DRY-RUN] would install auto-link '$LABEL':"
+    echo "  runs      : /bin/bash $SYNC"
+    if [ "$(uname)" = "Darwin" ]; then
+        echo "  plist     : $HOME/Library/LaunchAgents/$LABEL.plist"
+        if [ "$AT_LOGON" != "False" ]; then echo "  trigger   : at login (RunAtLoad)"; fi
+        if [ "$INTERVAL_MIN" -gt 0 ]; then echo "  trigger   : every ${INTERVAL_MIN}min (StartInterval)"; fi
+    else
+        if [ "$AT_LOGON" != "False" ]; then echo "  trigger   : at boot (@reboot)"; fi
+        if [ "$INTERVAL_MIN" -gt 0 ]; then echo "  trigger   : every ${INTERVAL_MIN}min"; fi
+    fi
+    exit 0
 fi
 
 if [ "$(uname)" = "Darwin" ]; then

@@ -42,6 +42,14 @@ jobs:
         shell: pwsh
         run: |
           .\tests\smoke-windows.ps1
+      - name: AutoLink dry-run (no real registration)
+        shell: pwsh
+        run: |
+          $out = .\install-autolink.ps1 -DryRun
+          if ($out -notmatch 'DRY-RUN') { throw "expected DRY-RUN output, got: $out" }
+          $t = Get-ScheduledTask -TaskName 'CCSwitch Skills AutoLink' -ErrorAction SilentlyContinue
+          if ($null -ne $t) { throw "dry-run must not register the task" }
+          Write-Host "OK: autolink dry-run (no task registered)"
 
   shell:
     name: Lint + smoke test (Unix)
@@ -62,3 +70,7 @@ jobs:
       - name: Functional smoke test
         run: |
           bash tests/smoke-unix.sh
+      - name: AutoLink dry-run (no real registration)
+        run: |
+          bash install-autolink.sh --dry-run | grep -q 'DRY-RUN'
+          echo "OK: autolink dry-run"
