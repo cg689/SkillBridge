@@ -6,7 +6,7 @@
 
 同步方式是**目录联接（Windows junction）/ 符号链接（Unix symlink）**，不是拷贝——所以 CC Switch 里对 skill 的**修改和删除会实时反映**到所有工具；新增的 skill 则由"自动补链"（Windows 计划任务 / Unix launchd·cron）在登录/开机时（或按设定的周期）自动接过去。
 
-- 纯脚本，无外部依赖，不装守护进程
+- 纯脚本，不装守护进程；Windows 零依赖，macOS/Linux 需 `python3`（用于解析配置）
 - 幂等：已存在的条目一律跳过，**绝不覆盖**各工具自己的 skill
 - 配置化：`config.json` 里自由增删目标工具
 - 可移植：所有路径基于环境变量（`%USERPROFILE%` / `%APPDATA%` / `%HERMES_HOME%`），可在任意电脑使用

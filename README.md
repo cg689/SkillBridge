@@ -32,7 +32,7 @@ Every AI coding tool maintains its own `skills/` directory. Copying skills aroun
 - Auto-detection (`detect-tools.ps1`) — adapts to whatever is installed on a machine
 - Auto-link at logon / boot (`install-autolink.ps1` / `.sh`) with optional interval
 - Cross-platform: PowerShell (Windows) and Bash (macOS / Linux)
-- Pure scripts, no external dependencies, no daemon
+- Pure scripts, no daemon; Windows needs nothing extra, macOS / Linux need `python3` (for config parsing)
 
 ## Quick Start (Windows)
 
