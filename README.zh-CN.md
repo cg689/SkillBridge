@@ -2,7 +2,7 @@
 
 # SkillBridge — CC Switch Skill Sync
 
-把 **CC Switch**（`~/.cc-switch/skills`）里的全部 Agent Skill 自动同步到 Claude Code / ZCode / WorkBuddy / Comate / Hermes Agent / TRAE 等其他编程工具。
+把 **CC Switch**（`~/.cc-switch/skills`）里的全部 Agent Skill 自动同步到 Claude Code / Gemini CLI / Cline / Kilo Code / ZCode / WorkBuddy / Comate / Hermes Agent / TRAE 等其他编程工具。
 
 同步方式是**目录联接（Windows junction）/ 符号链接（Unix symlink）**，不是拷贝——所以 CC Switch 里对 skill 的**修改和删除会实时反映**到所有工具；新增的 skill 则由"自动补链"（Windows 计划任务 / Unix launchd·cron）在登录/开机时（或按设定的周期）自动接过去。
 

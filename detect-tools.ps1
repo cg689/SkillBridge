@@ -23,6 +23,21 @@ $candidates = @(
         Skills = '%USERPROFILE%\.claude\skills'
     }
     @{
+        Name   = 'Gemini CLI'
+        Marker = '%USERPROFILE%\.gemini'
+        Skills = '%USERPROFILE%\.gemini\skills'
+    }
+    @{
+        Name   = 'Cline'
+        Marker = '%USERPROFILE%\.cline'
+        Skills = '%USERPROFILE%\.cline\skills'
+    }
+    @{
+        Name   = 'Kilo Code'
+        Marker = '%USERPROFILE%\.kilo'
+        Skills = '%USERPROFILE%\.kilo\skills'
+    }
+    @{
         Name   = 'ZCode'
         Marker = '%USERPROFILE%\.zcode'
         Skills = '%USERPROFILE%\.zcode\skills'

@@ -14,7 +14,7 @@
 
 ---
 
-SkillBridge mirrors the skills in **CC Switch** (`~/.cc-switch/skills`) into **17 AI coding tools** — Claude Code, ZCode, WorkBuddy, Comate, Hermes Agent, TRAE, Cherry Studio, CodeBuddy, AutoClaw, Verdent, Qoder, Doubao, MiniMax, Qwen Office, Grok Bot and more — using **directory junctions (Windows) / symlinks (Unix)** instead of copies. Skills stay live: edits and removals in CC Switch propagate instantly, and new skills are auto-linked at logon (at boot on Linux).
+SkillBridge mirrors the skills in **CC Switch** (`~/.cc-switch/skills`) into **20 AI coding tools** — Claude Code, Gemini CLI, Cline, Kilo Code, ZCode, WorkBuddy, Comate, Hermes Agent, TRAE, Cherry Studio, CodeBuddy, AutoClaw, Verdent, Qoder, Doubao, MiniMax, Qwen Office, Grok Bot and more — using **directory junctions (Windows) / symlinks (Unix)** instead of copies. Skills stay live: edits and removals in CC Switch propagate instantly, and new skills are auto-linked at logon (at boot on Linux).
 
 ## Why SkillBridge?
 

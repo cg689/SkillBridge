@@ -4,6 +4,9 @@
   "source": "%USERPROFILE%\\.cc-switch\\skills",
   "targets": {
     "Claude Code": "%USERPROFILE%\\.claude\\skills",
+    "Gemini CLI": "%USERPROFILE%\\.gemini\\skills",
+    "Cline": "%USERPROFILE%\\.cline\\skills",
+    "Kilo Code": "%USERPROFILE%\\.kilo\\skills",
     "ZCode": "%USERPROFILE%\\.zcode\\skills",
     "WorkBuddy": "%USERPROFILE%\\.workbuddy\\skills",
     "Comate": "%USERPROFILE%\\.comate\\skills",
