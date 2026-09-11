@@ -45,7 +45,7 @@ SkillBridge/
 ├── sync-skills.sh          # Unix 同步脚本（symlink）
 ├── install-autolink.ps1    # Windows：注册计划任务
 ├── install-autolink.sh     # Unix：注册 launchd / crontab
-├── config.json             # 目标工具配置（可增删）
+├── config.json             # 本机生成（detect-tools.ps1），不入库
 ├── config.example.json     # 可移植配置示例（基于环境变量）
 ├── 支持的软件列表.md         # 当前支持的应用与技能目录清单
 ├── README.md / README.zh-CN.md
@@ -60,8 +60,8 @@ SkillBridge/
 首次安装（一次性）：
 
 ```powershell
-# 1. 配置：编辑 config.json 里的 targets（增删要同步的工具）
-#    （或运行 detect-tools.ps1 自动探测本机已装工具）
+# 1. 生成 config.json（首次必做，该文件不入库）：
+#    - 运行 detect-tools.ps1 自动探测本机已装工具；或把 config.example.json 复制为 config.json 后编辑
 
 # 2. 手动同步一次（建好当前所有 skill 的链接）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-skills.ps1
@@ -79,6 +79,8 @@ chmod +x sync-skills.sh install-autolink.sh
 ```
 
 ## 配置（config.json）
+
+> `config.json` 是**本机专属且不入库**（已加入 .gitignore）。用 `detect-tools.ps1` 生成，或把 `config.example.json` 复制为 `config.json` 后自行编辑；入库模板是 `config.example.json`。
 
 ```json
 {

@@ -14,18 +14,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Validate config files
+      - name: Validate example config
         run: |
           python - <<'EOF'
           import json
-          for f in ("config.json", "config.example.json"):
-              with open(f, encoding="utf-8") as fh:
-                  json.load(fh)
-              print(f"{f}: OK")
+          with open("config.example.json", encoding="utf-8") as fh:
+              json.load(fh)
+          print("config.example.json: OK")
           EOF
 
   powershell:
-    name: Lint PowerShell scripts
+    name: Lint + smoke test (Windows)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,9 +37,13 @@ jobs:
             if ($errs.Count) { Write-Error "$($_.Name): $($errs -join '; ')" }
           }
           Write-Host "All PowerShell files parse OK"
+      - name: Functional smoke test
+        shell: pwsh
+        run: |
+          .\tests\smoke-windows.ps1
 
   shell:
-    name: Lint shell scripts
+    name: Lint + smoke test (Unix)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,9 +51,13 @@ jobs:
         run: |
           bash -n sync-skills.sh
           bash -n install-autolink.sh
+          bash -n tests/smoke-unix.sh
           echo "Bash syntax OK"
       - name: Shellcheck
         uses: ludeeus/action-shellcheck@master
         with:
           scandir: '.'
           severity: warning
+      - name: Functional smoke test
+        run: |
+          bash tests/smoke-unix.sh

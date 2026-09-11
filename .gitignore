@@ -1,6 +1,10 @@
 # Logs
 *.log
 
+# Machine-generated config (run detect-tools.ps1 to create yours)
+config.json
+
 # OS
 .DS_Store
 Thumbs.db
+

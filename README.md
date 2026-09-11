@@ -41,7 +41,7 @@ Every AI coding tool maintains its own `skills/` directory. Copying skills aroun
 One-time setup:
 
 ```powershell
-# 1. Configure config.json (or run detect-tools.ps1 to auto-generate it)
+# 1. Generate config.json for THIS machine — required on first run (it is not committed)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\detect-tools.ps1
 
 # 2. Sync once
@@ -72,6 +72,8 @@ chmod +x sync-skills.sh install-autolink.sh
 5. Optional: `install-autolink.ps1` for automatic sync at logon.
 
 ## Configuration (`config.json`)
+
+> `config.json` is **machine-specific and not committed** (gitignored). Generate it with `detect-tools.ps1`, or copy `config.example.json` → `config.json` and edit. The committed template is `config.example.json`.
 
 ```json
 {
@@ -126,7 +128,7 @@ SkillBridge/
 ├── sync-skills.sh          # Unix sync script (symlinks)
 ├── install-autolink.ps1    # Windows: register scheduled task
 ├── install-autolink.sh     # Unix: register launchd / crontab
-├── config.json             # target configuration (edit freely)
+├── config.json             # generated per machine (run detect-tools.ps1); gitignored
 ├── config.example.json     # portable env-var based example
 ├── 支持的软件列表.md         # supported tools & paths (中文)
 ├── .github/workflows/      # CI
