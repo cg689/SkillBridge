@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================
-rem  SkillBridge.bat - double-click to sync CC Switch skills
+rem  同步CCSwitch技能.bat - double-click to sync CC Switch skills
 rem  into every configured tool (ZCode, TRAE, Cherry Studio, ...)
 rem ============================================================
 title SkillBridge - CC Switch Skill Sync

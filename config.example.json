@@ -1,5 +1,5 @@
 {
-  "$comment": "SkillBridge — portable example. All paths use environment variables, so they resolve on ANY machine. Copy to config.json and adjust, or run detect-tools.ps1 to generate a config matching this machine automatically.",
+  "$comment": "SkillBridge — portable example (env-var paths resolve on any machine). Copy to config.json or run detect-tools.ps1 to generate one for this machine.",
   "link_type": "junction",
   "source": "%USERPROFILE%\\.cc-switch\\skills",
   "targets": {

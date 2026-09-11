@@ -14,14 +14,14 @@
 
 ---
 
-SkillBridge mirrors the skills in **CC Switch** (`~/.cc-switch/skills`) into **16 AI coding tools** — ZCode, WorkBuddy, Comate, Hermes Agent, TRAE, Cherry Studio, CodeBuddy, AutoClaw, Verdent, Qoder, Doubao, MiniMax, Qwen Office, Grok Bot and more — using **directory junctions (Windows) / symlinks (Unix)** instead of copies. Skills stay live: edits and removals in CC Switch propagate instantly, and new skills are auto-linked at logon.
+SkillBridge mirrors the skills in **CC Switch** (`~/.cc-switch/skills`) into **16 AI coding tools** — ZCode, WorkBuddy, Comate, Hermes Agent, TRAE, Cherry Studio, CodeBuddy, AutoClaw, Verdent, Qoder, Doubao, MiniMax, Qwen Office, Grok Bot and more — using **directory junctions (Windows) / symlinks (Unix)** instead of copies. Skills stay live: edits and removals in CC Switch propagate instantly, and new skills are auto-linked at logon (at boot on Linux).
 
 ## Why SkillBridge?
 
 Every AI coding tool maintains its own `skills/` directory. Copying skills around by hand is slow, drifts out of sync, and breaks the moment a tool is reinstalled. SkillBridge makes **CC Switch the single source of truth** and every other tool a live consumer of it:
 
 - **Edits / removals propagate instantly** — a junction is a live reference, not a stale copy.
-- **New skills are linked automatically** at logon (Windows scheduled task / launchd / cron).
+- **New skills are linked automatically** at logon — at boot on Linux (Windows scheduled task / launchd / cron).
 - **Idempotent & safe** — existing entries are never overwritten; a tool's own skills are never touched.
 - **Portable** — every path uses environment variables (`%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%`), so it runs on any machine as-is.
 
@@ -30,7 +30,7 @@ Every AI coding tool maintains its own `skills/` directory. Copying skills aroun
 - Live sync via junctions / symlinks — no periodic re-copying
 - Config-driven targets (`config.json`) — add or drop a tool in one line
 - Auto-detection (`detect-tools.ps1`) — adapts to whatever is installed on a machine
-- Auto-link at logon (`install-autolink.ps1` / `.sh`) with optional interval
+- Auto-link at logon / boot (`install-autolink.ps1` / `.sh`) with optional interval
 - Cross-platform: PowerShell (Windows) and Bash (macOS / Linux)
 - Pure scripts, no external dependencies, no daemon
 
@@ -56,7 +56,7 @@ macOS / Linux:
 ```bash
 chmod +x sync-skills.sh install-autolink.sh
 ./sync-skills.sh          # sync once
-./install-autolink.sh     # register at-login auto-link
+./install-autolink.sh     # register auto-link (macOS: at login / Linux: at boot)
 ```
 
 ## Installation on a New Machine
@@ -109,7 +109,7 @@ See [支持的软件列表.md](支持的软件列表.md) for the full list of su
 └────────┬───────────┘                                 ├─────────────────┤
          │ ① edits/removals propagate instantly         │ Comate skills/  │
          │ ② new skills need one new link               └─────────────────┘
-         └──▶ sync-skills script + task/launchd (auto-link at logon)
+         └──▶ sync-skills script + task/launchd (auto-link at logon / boot)
 ```
 
 1. **Junction / Symlink** — `<tool>/skills/<name> → ~/.cc-switch/skills/<name>`. A reference, not a copy: edit once, every tool reads the new version; deleting a skill leaves a harmless dangling link.

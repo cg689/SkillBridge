@@ -4,7 +4,7 @@
 
 把 **CC Switch**（`~/.cc-switch/skills`）里的全部 Agent Skill 自动同步到 ZCode / WorkBuddy / Comate / Hermes Agent / TRAE 等其他编程工具。
 
-同步方式是**目录联接（Windows junction）/ 符号链接（Unix symlink）**，不是拷贝——所以 CC Switch 里对 skill 的**修改和删除会实时反映**到所有工具；新增的 skill 则由"自动补链"（Windows 计划任务 / Unix launchd·cron）在登录时（或按设定的周期）自动接过去。
+同步方式是**目录联接（Windows junction）/ 符号链接（Unix symlink）**，不是拷贝——所以 CC Switch 里对 skill 的**修改和删除会实时反映**到所有工具；新增的 skill 则由"自动补链"（Windows 计划任务 / Unix launchd·cron）在登录/开机时（或按设定的周期）自动接过去。
 
 - 纯脚本，无外部依赖，不装守护进程
 - 幂等：已存在的条目一律跳过，**绝不覆盖**各工具自己的 skill
@@ -26,14 +26,14 @@
 └────────┬───────────┘                                  ├─────────────────┤
          │ ① 修改/删除 → 实时生效（链接是活的）            │ Comate skills/  │
          │ ② 新增 skill → 需要建一个新链接                 └─────────────────┘
-         └──▶ sync-skills 脚本 + 计划任务/launchd（登录时自动补链）
+         └──▶ sync-skills 脚本 + 计划任务/launchd（登录/开机时自动补链）
 ```
 
 1. **Junction / Symlink（活链接）**：`<工具>/skills/<name> → ~/.cc-switch/skills/<name>`。因为是引用而非拷贝，源文件一改，所有工具立刻读到新版；删除 skill 时链接失效（无害）。
 2. **同步脚本（幂等补链）**：扫描真源目录，对每个含 `SKILL.md` 的 skill，在配置的每个目标目录里**缺哪个补哪个**链接；已存在的一律跳过。
 3. **自动触发**：
    - Windows：`install-autolink.ps1` 注册计划任务（登录时触发，可选按分钟重复）。
-   - macOS/Linux：`install-autolink.sh` 注册 launchd（macOS）或 crontab（Linux）。
+   - macOS/Linux：`install-autolink.sh` 注册 launchd（macOS）或 crontab（Linux，开机时触发）。
 
 ## 目录结构
 
@@ -75,7 +75,7 @@ macOS / Linux：
 ```bash
 chmod +x sync-skills.sh install-autolink.sh
 ./sync-skills.sh            # 手动同步
-./install-autolink.sh       # 注册登录自启
+./install-autolink.sh       # 注册自启（macOS 登录时 / Linux 开机时）
 ```
 
 ## 配置（config.json）

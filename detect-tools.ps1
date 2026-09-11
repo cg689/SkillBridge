@@ -12,35 +12,94 @@ param(
     [switch]$All
 )
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'common.psm1') -Force
 $configPath = Join-Path $PSScriptRoot 'config.json'
 
 # name -> @{ Marker = config dir that proves the tool is installed; Skills = skills dir template }
 $candidates = @(
-    @{ Name = 'ZCode';            Marker = '%USERPROFILE%\.zcode';             Skills = '%USERPROFILE%\.zcode\skills' }
-    @{ Name = 'WorkBuddy';        Marker = '%USERPROFILE%\.workbuddy';         Skills = '%USERPROFILE%\.workbuddy\skills' }
-    @{ Name = 'WorkBuddy AI';     Marker = '%USERPROFILE%\.workbuddy-ai';      Skills = '%USERPROFILE%\.workbuddy-ai\skills' }
-    @{ Name = 'Comate';           Marker = '%USERPROFILE%\.comate';            Skills = '%USERPROFILE%\.comate\skills' }
-    @{ Name = 'Hermes Agent';     Marker = '%HERMES_HOME%';                    Skills = '%HERMES_HOME%\skills' }
-    @{ Name = 'TRAE Work CN';     Marker = '%USERPROFILE%\.trae-cn';           Skills = '%USERPROFILE%\.trae-cn\skills' }
-    @{ Name = 'Cherry Studio';    Marker = '%APPDATA%\CherryStudio';           Skills = '%APPDATA%\CherryStudio\Data\Skills' }
-    @{ Name = 'CodeBuddy CN';     Marker = '%USERPROFILE%\.codebuddy';         Skills = '%USERPROFILE%\.codebuddy\skills' }
-    @{ Name = 'DeepSeek Harness'; Marker = '%USERPROFILE%\.agents';            Skills = '%USERPROFILE%\.agents\skills' }
-    @{ Name = 'AutoClaw';         Marker = '%USERPROFILE%\.openclaw-autoclaw'; Skills = '%USERPROFILE%\.openclaw-autoclaw\skills' }
-    @{ Name = 'Verdent';          Marker = '%USERPROFILE%\.verdent';           Skills = '%USERPROFILE%\.verdent\skills' }
-    @{ Name = 'Qoder CN';         Marker = '%USERPROFILE%\.qoder-cn';          Skills = '%USERPROFILE%\.qoder-cn\skills' }
-    @{ Name = 'Doubao';           Marker = '%USERPROFILE%\DoubaoWork';         Skills = '%USERPROFILE%\DoubaoWork\skills' }
-    @{ Name = 'MiniMax Code';     Marker = '%USERPROFILE%\.minimax';           Skills = '%USERPROFILE%\.minimax\skills' }
-    @{ Name = 'Qwen Office';      Marker = '%USERPROFILE%\.qwenworkcn';        Skills = '%USERPROFILE%\.qwenworkcn\skills' }
-    @{ Name = 'Grok Bot';         Marker = '%USERPROFILE%\.grok';              Skills = '%USERPROFILE%\.grok\skills' }
+    @{
+        Name   = 'ZCode'
+        Marker = '%USERPROFILE%\.zcode'
+        Skills = '%USERPROFILE%\.zcode\skills'
+    }
+    @{
+        Name   = 'WorkBuddy'
+        Marker = '%USERPROFILE%\.workbuddy'
+        Skills = '%USERPROFILE%\.workbuddy\skills'
+    }
+    @{
+        Name   = 'WorkBuddy AI'
+        Marker = '%USERPROFILE%\.workbuddy-ai'
+        Skills = '%USERPROFILE%\.workbuddy-ai\skills'
+    }
+    @{
+        Name   = 'Comate'
+        Marker = '%USERPROFILE%\.comate'
+        Skills = '%USERPROFILE%\.comate\skills'
+    }
+    @{
+        Name   = 'Hermes Agent'
+        Marker = '%HERMES_HOME%'
+        Skills = '%HERMES_HOME%\skills'
+    }
+    @{
+        Name   = 'TRAE Work CN'
+        Marker = '%USERPROFILE%\.trae-cn'
+        Skills = '%USERPROFILE%\.trae-cn\skills'
+    }
+    @{
+        Name   = 'Cherry Studio'
+        Marker = '%APPDATA%\CherryStudio'
+        Skills = '%APPDATA%\CherryStudio\Data\Skills'
+    }
+    @{
+        Name   = 'CodeBuddy CN'
+        Marker = '%USERPROFILE%\.codebuddy'
+        Skills = '%USERPROFILE%\.codebuddy\skills'
+    }
+    @{
+        Name   = 'DeepSeek Harness'
+        Marker = '%USERPROFILE%\.agents'
+        Skills = '%USERPROFILE%\.agents\skills'
+    }
+    @{
+        Name   = 'AutoClaw'
+        Marker = '%USERPROFILE%\.openclaw-autoclaw'
+        Skills = '%USERPROFILE%\.openclaw-autoclaw\skills'
+    }
+    @{
+        Name   = 'Verdent'
+        Marker = '%USERPROFILE%\.verdent'
+        Skills = '%USERPROFILE%\.verdent\skills'
+    }
+    @{
+        Name   = 'Qoder CN'
+        Marker = '%USERPROFILE%\.qoder-cn'
+        Skills = '%USERPROFILE%\.qoder-cn\skills'
+    }
+    @{
+        Name   = 'Doubao'
+        Marker = '%USERPROFILE%\DoubaoWork'
+        Skills = '%USERPROFILE%\DoubaoWork\skills'
+    }
+    @{
+        Name   = 'MiniMax Code'
+        Marker = '%USERPROFILE%\.minimax'
+        Skills = '%USERPROFILE%\.minimax\skills'
+    }
+    @{
+        Name   = 'Qwen Office'
+        Marker = '%USERPROFILE%\.qwenworkcn'
+        Skills = '%USERPROFILE%\.qwenworkcn\skills'
+    }
+    @{
+        Name   = 'Grok Bot'
+        Marker = '%USERPROFILE%\.grok'
+        Skills = '%USERPROFILE%\.grok\skills'
+    }
 )
 
-function Expand-EnvPath {
-    param([string]$Path)
-    if ($env:OS -eq 'Windows_NT') { return [Environment]::ExpandEnvironmentVariables($Path) }
-    return $Path.Replace('$HOME', $HOME)
-}
-
-$targets = @{}
+$targets = [ordered]@{}
 $found = @()
 $missed = @()
 foreach ($c in $candidates) {
@@ -58,15 +117,62 @@ $existing = $null
 if (Test-Path $configPath) {
     try { $existing = Get-Content $configPath -Raw | ConvertFrom-Json } catch { $existing = $null }
 }
-$cfg = @{
-    '$comment' = 'SkillBridge - auto-generated by detect-tools.ps1 for THIS machine.'
-    link_type  = if ($existing -and $existing.link_type) { $existing.link_type } else { 'junction' }
-    source     = if ($existing -and $existing.source)     { $existing.source }     else { '%USERPROFILE%\.cc-switch\skills' }
-    targets    = $targets
-    autolink   = if ($existing -and $existing.autolink) { $existing.autolink } else { @{ enabled = $true; at_logon = $true; interval_minutes = 0 } }
+$autolink = if ($existing -and $existing.autolink) {
+    $existing.autolink
+} else {
+    [ordered]@{ enabled = $true; at_logon = $true; interval_minutes = 0 }
+}
+$cfgLinkType = if ($existing -and $existing.link_type) { $existing.link_type } else { 'junction' }
+$cfgSource   = if ($existing -and $existing.source)     { $existing.source }     else { '%USERPROFILE%\.cc-switch\skills' }
+
+# Emit with a stable key order and 2-space indentation, matching config.example.json.
+# (PS5.1 ConvertTo-Json indents nested objects irregularly, so we serialize this
+# fixed-shape config by hand.)
+function ConvertTo-SkillBridgeConfig {
+    param(
+        [string]$Comment,
+        [string]$LinkType,
+        [string]$Source,
+        [System.Collections.IDictionary]$Targets,
+        $Autolink
+    )
+    $esc = { param($s) ($s -replace '\\', '\\' -replace '"', '\"') }
+    $enabled  = if ($Autolink -and $null -ne $Autolink.enabled)  { [bool]$Autolink.enabled }  else { $true }
+    $atLogon  = if ($Autolink -and $null -ne $Autolink.at_logon) { [bool]$Autolink.at_logon } else { $true }
+    $interval = if ($Autolink -and $null -ne $Autolink.interval_minutes) { [int]$Autolink.interval_minutes } else { 0 }
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine('{')
+    [void]$sb.AppendLine('  "$comment": "' + (& $esc $Comment) + '",')
+    [void]$sb.AppendLine('  "link_type": "' + (& $esc $LinkType) + '",')
+    [void]$sb.AppendLine('  "source": "' + (& $esc $Source) + '",')
+    [void]$sb.AppendLine('  "targets": {')
+    $names = @($Targets.Keys)
+    for ($i = 0; $i -lt $names.Count; $i++) {
+        $comma = if ($i -lt $names.Count - 1) { ',' } else { '' }
+        $line = '    "' + (& $esc $names[$i]) + '": "'
+        $line += (& $esc ([string]$Targets[$names[$i]])) + '"' + $comma
+        [void]$sb.AppendLine($line)
+    }
+    [void]$sb.AppendLine('  },')
+    [void]$sb.AppendLine('  "autolink": {')
+    [void]$sb.AppendLine("    `"enabled`": $(if ($enabled) { 'true' } else { 'false' }),")
+    [void]$sb.AppendLine("    `"at_logon`": $(if ($atLogon) { 'true' } else { 'false' }),")
+    [void]$sb.AppendLine("    `"interval_minutes`": $interval")
+    [void]$sb.AppendLine('  }')
+    [void]$sb.AppendLine('}')
+    return $sb.ToString()
 }
 
-$json = $cfg | ConvertTo-Json -Depth 6
+$jsonParams = @{
+    Comment  = 'SkillBridge - auto-generated by detect-tools.ps1 for THIS machine.'
+    LinkType = $cfgLinkType
+    Source   = $cfgSource
+    Targets  = $targets
+    Autolink = $autolink
+}
+$json = ConvertTo-SkillBridgeConfig @jsonParams
+
 [System.IO.File]::WriteAllText($configPath, $json, (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Host "Detected $($found.Count) / $($candidates.Count) supported tools."

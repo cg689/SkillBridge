@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # install-autolink.sh — Register an auto-link on macOS (launchd) / Linux (crontab).
-# Runs sync-skills.sh at login so newly added CC Switch skills are linked into
-# every configured target tool.
+# Runs sync-skills.sh so newly added CC Switch skills are linked into every
+# configured target tool. macOS triggers at LOGIN (launchd RunAtLoad); Linux
+# triggers at BOOT (crontab @reboot), plus an optional repeating interval.
+# Defaults (enabled / interval) come from the `autolink` block in config.json.
 #
 # Usage:
-#   ./install-autolink.sh                # at logon
-#   ./install-autolink.sh --interval 30  # at logon + every 30 minutes
+#   ./install-autolink.sh                # config defaults
+#   ./install-autolink.sh --interval 30  # override interval (minutes)
 #   ./install-autolink.sh --uninstall
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYNC="$SCRIPT_DIR/sync-skills.sh"
 LABEL="com.user.ccswitch-skill-sync"
-INTERVAL_MIN="${INTERVAL_MIN:-0}"
+INTERVAL_MIN="${INTERVAL_MIN:-}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -27,9 +29,29 @@ while [ $# -gt 0 ]; do
             echo "Uninstalled auto-link."
             exit 0
             ;;
-        *) echo "unknown option: $1"; exit 1 ;;
+        *) echo "unknown option: $1" >&2; exit 1 ;;
     esac
 done
+
+# config.json `autolink` block provides the defaults (enabled / interval_minutes)
+CONFIG="$SCRIPT_DIR/config.json"
+if [ -f "$CONFIG" ] && command -v python3 >/dev/null 2>&1; then
+    read -r AL_ENABLED AL_INTERVAL < <(python3 - "$CONFIG" <<'PY' 2>/dev/null || echo "True 0"
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+al = cfg.get("autolink", {})
+print("%s %s" % (al.get("enabled", True), al.get("interval_minutes", 0)))
+PY
+)
+    if [ "$AL_ENABLED" = "False" ]; then
+        echo "AutoLink disabled by config (autolink.enabled=false). Not installing."
+        exit 0
+    fi
+    if [ -z "$INTERVAL_MIN" ] || [ "$INTERVAL_MIN" = "0" ]; then
+        INTERVAL_MIN="${AL_INTERVAL:-0}"
+    fi
+fi
+INTERVAL_MIN="${INTERVAL_MIN:-0}"
 
 if [ "$(uname)" = "Darwin" ]; then
     mkdir -p "$HOME/Library/LaunchAgents"
@@ -58,9 +80,13 @@ EOF
 EOF
     launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || true
     launchctl enable "gui/$(id -u)/$LABEL"
-    echo "Installed launchd agent '$LABEL' (at login${INTERVAL_MIN:+, every ${INTERVAL_MIN}min})."
+    if [ "$INTERVAL_MIN" -gt 0 ]; then
+        echo "Installed launchd agent '$LABEL' (at login, every ${INTERVAL_MIN}min)."
+    else
+        echo "Installed launchd agent '$LABEL' (at login)."
+    fi
 else
-    # Linux: crontab @reboot (plus optional */N minutes)
+    # Linux: crontab @reboot (boot, not login) plus optional */N minutes
     tmp="$(mktemp)"
     crontab -l 2>/dev/null | grep -v "$SYNC" > "$tmp"
     echo "@reboot /bin/bash $SYNC >> \"$SCRIPT_DIR/sync-skills.log\" 2>&1" >> "$tmp"
@@ -69,5 +95,9 @@ else
     fi
     crontab "$tmp"
     rm -f "$tmp"
-    echo "Installed crontab entry for '$SYNC' (at boot${INTERVAL_MIN:+, every ${INTERVAL_MIN}min})."
+    if [ "$INTERVAL_MIN" -gt 0 ]; then
+        echo "Installed crontab entry for '$SYNC' (at boot, every ${INTERVAL_MIN}min)."
+    else
+        echo "Installed crontab entry for '$SYNC' (at boot)."
+    fi
 fi
