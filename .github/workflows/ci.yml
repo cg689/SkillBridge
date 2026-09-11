@@ -31,6 +31,7 @@ jobs:
       - name: Parse-check all .ps1 files
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $errs = $null
           Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
             $null = [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs)

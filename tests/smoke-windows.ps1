@@ -22,25 +22,31 @@ Set-Content -Path (Join-Path $tmp 'src\demo-skill\SKILL.md') -Value '# demo' -En
 $cfg = @{
     link_type = 'junction'
     source    = (Join-Path $tmp 'src')
-    targets   = @{ Smoke = (Join-Path $tmp 'tgt') }
+    targets   = @{
+        Smoke   = (Join-Path $tmp 'tgt')
+        BadTool = '%NOPE_UNSET_VAR%\skills'
+    }
 } | ConvertTo-Json -Depth 5
 $cfgPath = Join-Path $tmp 'cfg.json'
 [System.IO.File]::WriteAllText($cfgPath, $cfg, (New-Object System.Text.UTF8Encoding($false)))
 
 try {
-    # run 1: link created
-    & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath | Out-Null
+    # run 1: link created; unresolved-%VAR% target skipped (not counted, no literal dir)
+    $out1 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
+    if ($out1 -notmatch 'created=1') {
+        throw "FAIL: first run expected created=1, got: $out1"
+    }
     $link = Get-Item (Join-Path $tmp 'tgt\demo-skill') -Force
     if ($link.LinkType -ne 'Junction') {
         throw "FAIL: junction not created (LinkType=$($link.LinkType))"
     }
 
     # run 2: idempotent
-    $out = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
-    if ($out -notmatch 'skipped=1') {
-        throw "FAIL: second run not idempotent (expected skipped=1, got: $out)"
+    $out2 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
+    if ($out2 -notmatch 'skipped=1') {
+        throw "FAIL: second run not idempotent (expected skipped=1, got: $out2)"
     }
-    Write-Host 'OK: windows smoke (junction created, idempotent)'
+    Write-Host 'OK: windows smoke (junction created, idempotent, bad target skipped)'
 
     # detect-tools: produces a valid config.json with at least one target
     & (Join-Path $root 'detect-tools.ps1') -All | Out-Null

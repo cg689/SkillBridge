@@ -26,7 +26,8 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 # Read the config in ONE python pass: line 1 = expanded source dir, following
-# lines = expanded target dirs. Fail loudly instead of silently defaulting.
+# lines = expanded target dirs. A target whose env var is unset is skipped with
+# a warning on stderr (not counted); a broken source aborts the whole run.
 read_config() {
     python3 - "$CONFIG" <<'PY'
 import json, sys, os
@@ -40,15 +41,19 @@ def norm(v):
     v = v.replace("%USERPROFILE%", os.path.expanduser("~"))
     v = v.replace("%APPDATA%", os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")))
     v = v.replace("%LOCALAPPDATA%", os.path.expanduser("~/.local/share"))
-    v = v.replace("%HERMES_HOME%", os.environ.get("HERMES_HOME", ""))
+    if "HERMES_HOME" in os.environ:
+        v = v.replace("%HERMES_HOME%", os.environ["HERMES_HOME"])
     v = os.path.expandvars(v)
     if "%" in v or "\\" in v:
-        raise SystemExit("unresolved env var or backslash in path: %r" % v)
+        raise ValueError("unresolved env var or backslash in path: %r" % v)
     return v
 
 print(norm(cfg["source"]))
 for v in cfg.get("targets", {}).values():
-    print(norm(v))
+    try:
+        print(norm(v))
+    except ValueError as e:
+        print("WARN target skipped: %s" % e, file=sys.stderr)
 PY
 }
 
@@ -72,6 +77,7 @@ fi
 
 created=0
 skipped=0
+failed=0
 skill_count=0
 
 for skill in "$SRC"/*/; do
@@ -88,11 +94,15 @@ for skill in "$SRC"/*/; do
                 skipped=$((skipped+1))
                 continue
             fi
-            if ln -s "$skill" "$link" 2>>"$LOG"; then
+            if err="$(ln -s "$skill" "$link" 2>&1)"; then
                 created=$((created+1))
                 echo "created  $(basename "$tdir") : $name" >> "$LOG"
+            elif printf '%s' "$err" | grep -qi 'exists'; then
+                # lost a race with a concurrent run — treat as already linked
+                skipped=$((skipped+1))
             else
-                echo "FAILED   $(basename "$tdir") : $name" >> "$LOG"
+                failed=$((failed+1))
+                echo "FAILED   $(basename "$tdir") : $name -> $err" >> "$LOG"
             fi
         done
     fi
@@ -103,4 +113,7 @@ if [ "$skill_count" -eq 0 ]; then
     exit 1
 fi
 
-echo "== done $(date '+%Y-%m-%d %H:%M:%S') | created=$created skipped=$skipped ==" | tee -a "$LOG"
+echo "== done $(date '+%Y-%m-%d %H:%M:%S') | created=$created skipped=$skipped failed=$failed ==" | tee -a "$LOG"
+if [ "$failed" -gt 0 ]; then
+    exit 1
+fi

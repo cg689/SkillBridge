@@ -3,7 +3,8 @@
 # Runs sync-skills.sh so newly added CC Switch skills are linked into every
 # configured target tool. macOS triggers at LOGIN (launchd RunAtLoad); Linux
 # triggers at BOOT (crontab @reboot), plus an optional repeating interval.
-# Defaults (enabled / interval) come from the `autolink` block in config.json.
+# Defaults (enabled / at_logon / interval) come from the `autolink` block in
+# config.json; --interval overrides the interval.
 #
 # Usage:
 #   ./install-autolink.sh                # config defaults
@@ -33,16 +34,18 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# config.json `autolink` block provides the defaults (enabled / interval_minutes)
+# config.json `autolink` block provides the defaults (enabled / at_logon / interval)
 CONFIG="$SCRIPT_DIR/config.json"
+AT_LOGON="True"
 if [ -f "$CONFIG" ] && command -v python3 >/dev/null 2>&1; then
-    read -r AL_ENABLED AL_INTERVAL < <(python3 - "$CONFIG" <<'PY' 2>/dev/null || echo "True 0"
+    read -r AL_ENABLED AL_AT_LOGON AL_INTERVAL < <(python3 - "$CONFIG" <<'PY' 2>/dev/null || echo "True True 0"
 import json, sys
 cfg = json.load(open(sys.argv[1]))
 al = cfg.get("autolink", {})
-print("%s %s" % (al.get("enabled", True), al.get("interval_minutes", 0)))
+print("%s %s %s" % (al.get("enabled", True), al.get("at_logon", True), al.get("interval_minutes", 0)))
 PY
 )
+    AT_LOGON="${AL_AT_LOGON:-True}"
     if [ "$AL_ENABLED" = "False" ]; then
         echo "AutoLink disabled by config (autolink.enabled=false). Not installing."
         exit 0
@@ -52,6 +55,11 @@ PY
     fi
 fi
 INTERVAL_MIN="${INTERVAL_MIN:-0}"
+
+if [ "$AT_LOGON" = "False" ] && [ "$INTERVAL_MIN" -le 0 ]; then
+    echo "[ERROR] nothing to schedule: at_logon=false and interval_minutes=0." >&2
+    exit 1
+fi
 
 if [ "$(uname)" = "Darwin" ]; then
     mkdir -p "$HOME/Library/LaunchAgents"
@@ -67,8 +75,12 @@ if [ "$(uname)" = "Darwin" ]; then
         <string>/bin/bash</string>
         <string>$SYNC</string>
     </array>
+EOF
+    if [ "$AT_LOGON" != "False" ]; then
+        cat >> "$PLIST" <<EOF
     <key>RunAtLoad</key><true/>
 EOF
+    fi
     if [ "$INTERVAL_MIN" -gt 0 ]; then
         cat >> "$PLIST" <<EOF
     <key>StartInterval</key><integer>$((INTERVAL_MIN * 60))</integer>
@@ -80,24 +92,34 @@ EOF
 EOF
     launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || true
     launchctl enable "gui/$(id -u)/$LABEL"
-    if [ "$INTERVAL_MIN" -gt 0 ]; then
-        echo "Installed launchd agent '$LABEL' (at login, every ${INTERVAL_MIN}min)."
+    if [ "$AT_LOGON" != "False" ]; then
+        if [ "$INTERVAL_MIN" -gt 0 ]; then
+            echo "Installed launchd agent '$LABEL' (at login, every ${INTERVAL_MIN}min)."
+        else
+            echo "Installed launchd agent '$LABEL' (at login)."
+        fi
     else
-        echo "Installed launchd agent '$LABEL' (at login)."
+        echo "Installed launchd agent '$LABEL' (at interval only, every ${INTERVAL_MIN}min)."
     fi
 else
     # Linux: crontab @reboot (boot, not login) plus optional */N minutes
     tmp="$(mktemp)"
     crontab -l 2>/dev/null | grep -v "$SYNC" > "$tmp"
-    echo "@reboot /bin/bash $SYNC >> \"$SCRIPT_DIR/sync-skills.log\" 2>&1" >> "$tmp"
+    if [ "$AT_LOGON" != "False" ]; then
+        echo "@reboot /bin/bash $SYNC >> \"$SCRIPT_DIR/sync-skills.log\" 2>&1" >> "$tmp"
+    fi
     if [ "$INTERVAL_MIN" -gt 0 ]; then
         echo "*/$INTERVAL_MIN * * * * /bin/bash $SYNC >> \"$SCRIPT_DIR/sync-skills.log\" 2>&1" >> "$tmp"
     fi
     crontab "$tmp"
     rm -f "$tmp"
-    if [ "$INTERVAL_MIN" -gt 0 ]; then
-        echo "Installed crontab entry for '$SYNC' (at boot, every ${INTERVAL_MIN}min)."
+    if [ "$AT_LOGON" != "False" ]; then
+        if [ "$INTERVAL_MIN" -gt 0 ]; then
+            echo "Installed crontab entry for '$SYNC' (at boot, every ${INTERVAL_MIN}min)."
+        else
+            echo "Installed crontab entry for '$SYNC' (at boot)."
+        fi
     else
-        echo "Installed crontab entry for '$SYNC' (at boot)."
+        echo "Installed crontab entry for '$SYNC' (at interval only, every ${INTERVAL_MIN}min)."
     fi
 fi

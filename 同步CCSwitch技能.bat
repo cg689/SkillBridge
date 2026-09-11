@@ -12,6 +12,10 @@ echo  [SkillBridge] Syncing CC Switch skills into all tools...
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0sync-skills.ps1"
 echo.
-echo  Done. Restart each tool's session to pick up new skills.
+if errorlevel 1 (
+  echo  [SkillBridge] Some skills failed to link - see sync-skills.log
+) else (
+  echo  Done. Restart each tool's session to pick up new skills.
+)
 echo.
 pause

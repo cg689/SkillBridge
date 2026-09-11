@@ -22,7 +22,11 @@ if (-not (Test-Path $ConfigPath)) {
     Write-Host "[ERROR] config not found: $ConfigPath" -ForegroundColor Red
     exit 1
 }
-$config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+$config = Read-ConfigFile $ConfigPath
+if ($null -eq $config) {
+    Write-Host "[ERROR] could not parse config: $ConfigPath" -ForegroundColor Red
+    exit 1
+}
 
 $src = Expand-EnvPath $config.source
 $log = Join-Path $PSScriptRoot 'sync-skills.log'
@@ -42,12 +46,14 @@ if ($skills.Count -eq 0) {
 # junction on Windows by default; honor config.link_type = 'symlink' if set
 $linkType = if ($config.link_type -eq 'symlink') { 'SymbolicLink' } else { 'Junction' }
 if ($linkType -eq 'SymbolicLink') {
-    Write-Host "NOTE: using symlinks (link_type=symlink) — may require admin / Developer Mode on Windows." -ForegroundColor Yellow
+    Write-Host ("NOTE: using symlinks (link_type=symlink) — may require " +
+        "admin / Developer Mode on Windows.") -ForegroundColor Yellow
 }
 
 $lines   = @()
 $created = 0
 $skipped = 0
+$failed  = 0
 
 foreach ($entry in $config.targets.PSObject.Properties) {
     $tool = $entry.Name
@@ -77,6 +83,7 @@ foreach ($entry in $config.targets.PSObject.Properties) {
             if ($_.Exception.Message -match 'exists') {
                 $skipped++
             } else {
+                $failed++
                 $lines += "FAILED   $tool : $($s.Name) -> $($_.Exception.Message)"
             }
         }
@@ -85,8 +92,9 @@ foreach ($entry in $config.targets.PSObject.Properties) {
 
 $summary = @(
     "== done $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    " | skills=$($skills.Count) created=$created skipped=$skipped =="
+    " | skills=$($skills.Count) created=$created skipped=$skipped failed=$failed =="
 ) -join ''
 $lines += $summary
 Write-Log -Lines $lines -Path $log
-Write-Host $summary
+Write-Output $summary
+if ($failed -gt 0) { exit 1 }

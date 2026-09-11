@@ -17,13 +17,13 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path $PSScriptRoot 'common.psm1') -Force
+
 # load the `autolink` block from config.json to fill in defaults
-$cfg = $null
 $cfgPath = Join-Path $PSScriptRoot 'config.json'
-if (Test-Path $cfgPath) {
-    try { $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json } catch { $cfg = $null }
-}
+$cfg = Read-ConfigFile $cfgPath
 $autolink = if ($cfg -and $cfg.autolink) { $cfg.autolink } else { $null }
+$al = Get-AutolinkDefaults $autolink
 
 if ($Unregister) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
@@ -31,17 +31,17 @@ if ($Unregister) {
     exit 0
 }
 
-if ($null -ne $autolink -and -not $autolink.enabled) {
+if (-not $al.enabled) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
     Write-Host "AutoLink disabled by config (autolink.enabled=false). Not registering."
     exit 0
 }
 
 if (-not $PSBoundParameters.ContainsKey('IntervalMinutes')) {
-    $IntervalMinutes = if ($autolink -and $autolink.interval_minutes) { [int]$autolink.interval_minutes } else { 0 }
+    $IntervalMinutes = $al.interval_minutes
 }
 if ($IntervalMinutes -lt 0) { $IntervalMinutes = 0 }
-$atLogon = if ($null -ne $autolink -and $null -ne $autolink.at_logon) { [bool]$autolink.at_logon } else { $true }
+$atLogon = $al.at_logon
 
 if (-not (Test-Path $ScriptPath)) {
     Write-Host "[ERROR] sync script not found: $ScriptPath" -ForegroundColor Red
@@ -51,14 +51,16 @@ if (-not (Test-Path $ScriptPath)) {
 $argument = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $ScriptPath + '"'
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $argument
 
-if ($atLogon -and $IntervalMinutes -le 0) {
+if ($atLogon) {
     $trigger = New-ScheduledTaskTrigger -AtLogOn
-} elseif ($atLogon) {
-    $trigger = New-ScheduledTaskTrigger -AtLogOn
-    $rep = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)
-    $trigger.Repetition = $rep.Repetition
+    if ($IntervalMinutes -gt 0) {
+        $span = New-TimeSpan -Minutes $IntervalMinutes
+        $rep = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval $span
+        $trigger.Repetition = $rep.Repetition
+    }
 } elseif ($IntervalMinutes -gt 0) {
-    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)
+    $span = New-TimeSpan -Minutes $IntervalMinutes
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval $span
 } else {
     Write-Host "[ERROR] nothing to schedule: at_logon=false and interval_minutes=0." -ForegroundColor Red
     exit 1

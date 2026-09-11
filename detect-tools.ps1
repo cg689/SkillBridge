@@ -113,17 +113,14 @@ foreach ($c in $candidates) {
 }
 
 # preserve source / autolink from an existing config if present
-$existing = $null
-if (Test-Path $configPath) {
-    try { $existing = Get-Content $configPath -Raw | ConvertFrom-Json } catch { $existing = $null }
-}
-$autolink = if ($existing -and $existing.autolink) {
-    $existing.autolink
-} else {
-    [ordered]@{ enabled = $true; at_logon = $true; interval_minutes = 0 }
-}
+$existing = Read-ConfigFile $configPath
+$autolink = Get-AutolinkDefaults $existing.autolink
 $cfgLinkType = if ($existing -and $existing.link_type) { $existing.link_type } else { 'junction' }
-$cfgSource   = if ($existing -and $existing.source)     { $existing.source }     else { '%USERPROFILE%\.cc-switch\skills' }
+$cfgSource = if ($existing -and $existing.source) {
+    $existing.source
+} else {
+    '%USERPROFILE%\.cc-switch\skills'
+}
 
 # Emit with a stable key order and 2-space indentation, matching config.example.json.
 # (PS5.1 ConvertTo-Json indents nested objects irregularly, so we serialize this
@@ -137,9 +134,10 @@ function ConvertTo-SkillBridgeConfig {
         $Autolink
     )
     $esc = { param($s) ($s -replace '\\', '\\' -replace '"', '\"') }
-    $enabled  = if ($Autolink -and $null -ne $Autolink.enabled)  { [bool]$Autolink.enabled }  else { $true }
-    $atLogon  = if ($Autolink -and $null -ne $Autolink.at_logon) { [bool]$Autolink.at_logon } else { $true }
-    $interval = if ($Autolink -and $null -ne $Autolink.interval_minutes) { [int]$Autolink.interval_minutes } else { 0 }
+    $d = Get-AutolinkDefaults $Autolink
+    $enabled  = $d.enabled
+    $atLogon  = $d.at_logon
+    $interval = $d.interval_minutes
 
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.AppendLine('{')
