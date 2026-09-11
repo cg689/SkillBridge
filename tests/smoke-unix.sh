@@ -36,13 +36,16 @@ TGT="$TMP/tgt"
 mkdir -p "$SRC/demo-skill" "$TGT"
 echo "# demo" > "$SRC/demo-skill/SKILL.md"
 
+# NOTE: unquoted heredoc collapses `\\` to `\`, so we write 4 backslashes to
+# emit a valid JSON escape (`\\`) and end up with the real value
+# `%HERMES_HOME%\skills` — faithfully mirroring config.example.json.
 cat > "$TMP/cfg.json" <<EOF
 {
   "link_type": "symlink",
   "source": "$SRC",
   "targets": {
     "Smoke": "$TGT",
-    "BadHome": "%HERMES_HOME%\\skills"
+    "BadHome": "%HERMES_HOME%\\\\skills"
   }
 }
 EOF
