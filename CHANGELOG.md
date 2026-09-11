@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%`).
 - `install-autolink.ps1` / `install-autolink.sh`: register auto-link at logon
   (Windows Scheduled Task / launchd / crontab), with optional interval.
-- 16 supported target tools out of the box.
+- 17 supported target tools out of the box.
 - Bilingual documentation (`README.md` / `README.zh-CN.md`) and
   `支持的软件列表.md` (supported tools list).
 

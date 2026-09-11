@@ -18,6 +18,11 @@ $configPath = Join-Path $PSScriptRoot 'config.json'
 # name -> @{ Marker = config dir that proves the tool is installed; Skills = skills dir template }
 $candidates = @(
     @{
+        Name   = 'Claude Code'
+        Marker = '%USERPROFILE%\.claude'
+        Skills = '%USERPROFILE%\.claude\skills'
+    }
+    @{
         Name   = 'ZCode'
         Marker = '%USERPROFILE%\.zcode'
         Skills = '%USERPROFILE%\.zcode\skills'
@@ -58,7 +63,7 @@ $candidates = @(
         Skills = '%USERPROFILE%\.codebuddy\skills'
     }
     @{
-        Name   = 'DeepSeek Harness'
+        Name   = 'Codex CLI / DeepSeek'
         Marker = '%USERPROFILE%\.agents'
         Skills = '%USERPROFILE%\.agents\skills'
     }

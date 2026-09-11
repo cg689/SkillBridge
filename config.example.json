@@ -3,6 +3,7 @@
   "link_type": "junction",
   "source": "%USERPROFILE%\\.cc-switch\\skills",
   "targets": {
+    "Claude Code": "%USERPROFILE%\\.claude\\skills",
     "ZCode": "%USERPROFILE%\\.zcode\\skills",
     "WorkBuddy": "%USERPROFILE%\\.workbuddy\\skills",
     "Comate": "%USERPROFILE%\\.comate\\skills",
