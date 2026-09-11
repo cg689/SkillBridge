@@ -39,13 +39,14 @@ cat > "$TMP/cfg.json" <<EOF
 }
 EOF
 
-"$ROOT/sync-skills.sh" "$TMP/cfg.json" >/dev/null
+# invoke via `bash` explicitly: the exec bit is not committed, so `./sync-skills.sh` would fail on a fresh checkout
+bash "$ROOT/sync-skills.sh" "$TMP/cfg.json" >/dev/null
 if [ ! -L "$TGT/demo-skill" ]; then
     echo "FAIL: symlink not created at $TGT/demo-skill" >&2
     exit 1
 fi
 
-out="$("$ROOT/sync-skills.sh" "$TMP/cfg.json")"
+out="$(bash "$ROOT/sync-skills.sh" "$TMP/cfg.json")"
 if ! printf '%s\n' "$out" | grep -q 'skipped=1'; then
     echo "FAIL: second run not idempotent (expected skipped=1, got: $out)" >&2
     exit 1
