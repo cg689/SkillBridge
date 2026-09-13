@@ -46,7 +46,8 @@ cat > "$TMP/cfg.json" <<EOF
   "targets": {
     "Smoke": "$TGT",
     "BadHome": "%HERMES_HOME%\\\\skills"
-  }
+  },
+  "check_db": false
 }
 EOF
 

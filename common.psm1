@@ -91,3 +91,14 @@ function Write-Log {
         if ($null -ne $fs) { $fs.Dispose() }
     }
 }
+
+function Resolve-PythonExe {
+    # Locate an interpreter for the optional database consistency check
+    # (check-db-sync.py). Returns $null when none is found, so callers can skip
+    # the check instead of failing the whole sync over a missing extra.
+    foreach ($name in @('python', 'python3')) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source) { return $cmd.Source }
+    }
+    return $null
+}

@@ -83,6 +83,16 @@ $candidates = @(
         Skills = '%USERPROFILE%\.agents\skills'
     }
     @{
+        Name   = 'Codex'
+        Marker = '%USERPROFILE%\.codex'
+        Skills = '%USERPROFILE%\.codex\skills'
+    }
+    @{
+        Name   = 'OpenCode'
+        Marker = '%USERPROFILE%\.config\opencode'
+        Skills = '%USERPROFILE%\.config\opencode\skills'
+    }
+    @{
         Name   = 'AutoClaw'
         Marker = '%USERPROFILE%\.openclaw-autoclaw'
         Skills = '%USERPROFILE%\.openclaw-autoclaw\skills'
@@ -151,7 +161,8 @@ function ConvertTo-SkillBridgeConfig {
         [string]$LinkType,
         [string]$Source,
         [System.Collections.IDictionary]$Targets,
-        $Autolink
+        $Autolink,
+        [bool]$CheckDb = $true
     )
     $esc = { param($s) ($s -replace '\\', '\\' -replace '"', '\"') }
     $d = Get-AutolinkDefaults $Autolink
@@ -177,7 +188,8 @@ function ConvertTo-SkillBridgeConfig {
     [void]$sb.AppendLine("    `"enabled`": $(if ($enabled) { 'true' } else { 'false' }),")
     [void]$sb.AppendLine("    `"at_logon`": $(if ($atLogon) { 'true' } else { 'false' }),")
     [void]$sb.AppendLine("    `"interval_minutes`": $interval")
-    [void]$sb.AppendLine('  }')
+    [void]$sb.AppendLine('  },')
+    [void]$sb.AppendLine("  `"check_db`": $(if ($CheckDb) { 'true' } else { 'false' })")
     [void]$sb.AppendLine('}')
     return $sb.ToString()
 }

@@ -26,6 +26,9 @@ $cfg = @{
         Smoke   = (Join-Path $tmp 'tgt')
         BadTool = '%NOPE_UNSET_VAR%\skills'
     }
+    # The DB check compares `source` against the real cc-switch.db. Off here, or
+    # a throwaway source would look like mass drift and get "repaired" into it.
+    check_db  = $false
 } | ConvertTo-Json -Depth 5
 $cfgPath = Join-Path $tmp 'cfg.json'
 [System.IO.File]::WriteAllText($cfgPath, $cfg, (New-Object System.Text.UTF8Encoding($false)))

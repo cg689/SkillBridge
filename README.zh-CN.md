@@ -29,9 +29,10 @@
          └──▶ sync-skills 脚本 + 计划任务/launchd（登录/开机时自动补链）
 ```
 
-1. **Junction / Symlink（活链接）**：`<工具>/skills/<name> → ~/.cc-switch/skills/<name>`。因为是引用而非拷贝，源文件一改，所有工具立刻读到新版；删除 skill 时链接失效（无害）。
-2. **同步脚本（幂等补链）**：扫描真源目录，对每个含 `SKILL.md` 的 skill，在配置的每个目标目录里**缺哪个补哪个**链接；已存在的一律跳过。
-3. **自动触发**：
+1. **Junction / Symlink（活链接）**：`<工具>/skills/<name> → ~/.cc-switch/skills/<name>`。因为是引用而非拷贝，源文件一改，所有工具立刻读到新版。
+2. **同步脚本（幂等补链 + 清理死链）**：扫描真源目录，对每个含 `SKILL.md` 的 skill，在配置的每个目标目录里**缺哪个补哪个**链接；已存在的一律跳过。删除 skill 后残留在目标目录的失效链接会被自动清理（见汇总里的 `pruned=`）。
+3. **数据库对齐**：同步末尾调用 `check-db-sync.py`，把 CC Switch 自己的技能库（`~/.cc-switch/cc-switch.db`）与技能目录对齐。CC Switch 不会重新扫描文件系统，所以手工拷进来或本地生成的 skill 不会自动登记——这一步负责补上。可在 `config.json` 里用 `"check_db": false` 关闭。
+4. **自动触发**：
    - Windows：`install-autolink.ps1` 注册计划任务（登录时触发，可选按分钟重复）。
    - macOS/Linux：`install-autolink.sh` 注册 launchd（macOS）或 crontab（Linux，开机时触发）。
 
@@ -43,6 +44,7 @@ SkillBridge/
 ├── detect-tools.ps1        # 自动探测本机已装工具并生成 config.json（适配新电脑）
 ├── sync-skills.ps1         # Windows 同步脚本（junction）
 ├── sync-skills.sh          # Unix 同步脚本（symlink）
+├── check-db-sync.py        # 对齐 CC Switch 技能数据库（同步末尾自动调用）
 ├── install-autolink.ps1    # Windows：注册计划任务
 ├── install-autolink.sh     # Unix：注册 launchd / crontab
 ├── config.json             # 本机生成（detect-tools.ps1），不入库
@@ -135,7 +137,10 @@ macOS / Linux 同理：`sync-skills.sh` 会自动把 `%USERPROFILE%` 映射到 `
 把该工具从 `targets` 里去掉，或用拷贝方案（自行把 `New-Item -ItemType Junction` 换成 `Copy-Item -Recurse`）。
 
 **删除 CC Switch 里的 skill 后目标目录残留失效链接？**
-无害；脚本默认不清理，避免误删工具自己的东西。如需清理可手动删掉对应目录。
+脚本会自动清理（汇总里的 `pruned=` 即清理数量）。判定依据是链接记录的目标路径已不存在；非链接的真实目录一律不动，所以工具自己装的 skill 不会被误删。
+
+**同步时脚本报 `pruned=0`，但目录里明明有失效链接？**
+先确认该目录在 `targets` 里。另外：`Test-Path` 对 junction **不解析目标**，悬空的也返回 `True`，所以不能用它判断——脚本比对的是链接记录的 `Target` 路径。
 
 ## License
 

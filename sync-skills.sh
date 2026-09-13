@@ -76,6 +76,7 @@ if [ ! -d "$SRC" ]; then
 fi
 
 created=0
+pruned=0
 skipped=0
 failed=0
 skill_count=0
@@ -113,7 +114,30 @@ if [ "$skill_count" -eq 0 ]; then
     exit 1
 fi
 
-echo "== done $(date '+%Y-%m-%d %H:%M:%S') | created=$created skipped=$skipped failed=$failed ==" | tee -a "$LOG"
+# Prune dead links — entries left behind when a skill is deleted from the source.
+# The loop above only walks skills that still exist, so it can never see them.
+for tdir in "${TARGETS[@]}"; do
+    [ -z "$tdir" ] && continue
+    [ -d "$tdir" ] || continue
+    for link in "$tdir"/*; do
+        # Only symlinks are ours to remove; a real folder belongs to the tool.
+        if [ -L "$link" ] && [ ! -e "$link" ]; then
+            rm -f "$link"
+            pruned=$((pruned+1))
+            echo "pruned   $(basename "$tdir") : $(basename "$link")" >> "$LOG"
+        fi
+    done
+done
+
+echo "== done $(date '+%Y-%m-%d %H:%M:%S') | created=$created pruned=$pruned skipped=$skipped failed=$failed ==" | tee -a "$LOG"
+
+# Keep cc-switch.db in step with the skills folder (see check-db-sync.py).
+# Optional: silently skipped when python3, the script, or the database is absent.
+check_db="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("check_db",True))' "$CONFIG" 2>/dev/null || echo True)"
+if [ "$check_db" = "True" ] && [ -f "$SCRIPT_DIR/check-db-sync.py" ] && [ -f "$HOME/.cc-switch/cc-switch.db" ]; then
+    python3 "$SCRIPT_DIR/check-db-sync.py" --fix --source "$SRC" --log "$LOG" || true
+fi
+
 if [ "$failed" -gt 0 ]; then
     exit 1
 fi

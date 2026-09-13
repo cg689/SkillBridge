@@ -22,6 +22,8 @@ Every AI coding tool maintains its own `skills/` directory. Copying skills aroun
 
 - **Edits / removals propagate instantly** — a junction is a live reference, not a stale copy.
 - **New skills are linked automatically** at logon — at boot on Linux (Windows scheduled task / launchd / cron).
+- **Dead links are pruned** — when a skill is deleted, the links it left behind are cleaned up instead of accumulating.
+- **The CC Switch database stays in step** — `check-db-sync.py` registers skills the database never picked up, so they also reach Codex and appear in the CC Switch UI.
 - **Idempotent & safe** — existing entries are never overwritten; a tool's own skills are never touched.
 - **Portable** — every path uses environment variables (`%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%`), so it runs on any machine as-is.
 
@@ -114,9 +116,10 @@ See [支持的软件列表.md](支持的软件列表.md) for the full list of su
          └──▶ sync-skills script + task/launchd (auto-link at logon / boot)
 ```
 
-1. **Junction / Symlink** — `<tool>/skills/<name> → ~/.cc-switch/skills/<name>`. A reference, not a copy: edit once, every tool reads the new version; deleting a skill leaves a harmless dangling link.
-2. **Sync script** — scans the source, creates a link in every configured target for each skill that is missing; skips anything that already exists.
-3. **Auto-trigger** — Windows Scheduled Task (`install-autolink.ps1`) or launchd/cron (`install-autolink.sh`).
+1. **Junction / Symlink** — `<tool>/skills/<name> → ~/.cc-switch/skills/<name>`. A reference, not a copy: edit once, every tool reads the new version.
+2. **Sync script** — scans the source, creates a link in every configured target for each skill that is missing; skips anything that already exists. Links left behind by deleted skills are pruned (reported as `pruned=` in the summary).
+3. **Database alignment** — `check-db-sync.py` runs at the end of every sync and reconciles CC Switch's own skill database (`~/.cc-switch/cc-switch.db`) with the skills folder. CC Switch never rescans the filesystem, so a skill copied in by hand or generated locally is never registered on its own. Disable with `"check_db": false` in `config.json`.
+4. **Auto-trigger** — Windows Scheduled Task (`install-autolink.ps1`) or launchd/cron (`install-autolink.sh`).
 
 ## Repository Layout
 
@@ -126,6 +129,7 @@ SkillBridge/
 ├── detect-tools.ps1        # auto-detect installed tools -> generate config.json
 ├── sync-skills.ps1         # Windows sync script (junctions)
 ├── sync-skills.sh          # Unix sync script (symlinks)
+├── check-db-sync.py        # reconcile CC Switch's skill DB (called by sync)
 ├── install-autolink.ps1    # Windows: register scheduled task
 ├── install-autolink.sh     # Unix: register launchd / crontab
 ├── config.json             # generated per machine (run detect-tools.ps1); gitignored
@@ -148,7 +152,10 @@ Tools re-scan their skills directory on session/UI restart — restart the tool.
 Remove it from `targets`, or switch to a copy strategy (replace `New-Item -ItemType Junction` with `Copy-Item -Recurse`).
 
 **Stale links left behind after deleting a CC Switch skill?**
-Harmless. The script intentionally never cleans up, to avoid deleting a tool's own entries. Remove leftover directories manually if you like.
+They are pruned automatically (reported as `pruned=` in the summary). The rule is "links only": an entry is removed when it is a link whose recorded target no longer exists. A real directory is never touched, so a tool's own skills stay safe.
+
+**The script reports `pruned=0` but the folder clearly has broken links?**
+Check that the folder is listed in `targets`. Also note that `Test-Path` does not resolve a junction's target — it returns `True` even for a dead one. The script compares the link's recorded `Target` path instead.
 
 ## Contributing
 
