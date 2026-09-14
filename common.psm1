@@ -168,7 +168,9 @@ function Read-ManagedSkills {
     if ($cfg -and $cfg.skills) {
         foreach ($n in @($cfg.skills)) { [void]$set.Add([string]$n) }
     }
-    return $set
+    # Unary comma: PowerShell enumerates a returned HashSet, so an empty one
+    # becomes $null and the caller cannot .Add.
+    return , $set
 }
 
 function Write-ManagedSkills {
