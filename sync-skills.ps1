@@ -30,7 +30,7 @@ if ($null -eq $config) {
     exit 1
 }
 
-$src = Expand-EnvPath $config.source
+$src = (Expand-EnvPath ([string]$config.source)).Trim()
 $log = Join-Path $PSScriptRoot 'sync-skills.log'
 
 if (-not (Test-Path $src)) {
@@ -160,7 +160,7 @@ foreach ($t in $targetList) {
     }
 
     if ($t.Mode -eq 'copy') {
-        Write-ManagedSkills -TargetDir $tdir -Names ([string[]]$managed.ToArray())
+        Write-ManagedSkills -TargetDir $tdir -Names $managed
     }
 }
 

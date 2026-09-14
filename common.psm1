@@ -174,14 +174,20 @@ function Read-ManagedSkills {
 function Write-ManagedSkills {
     param(
         [string]$TargetDir,
-        # string[] (not IEnumerable): PowerShell enumerates IEnumerable
-        # parameters, so a HashSet would be written as one letter per skill.
-        [string[]]$Names
+        # Untyped on purpose: [string[]] / [IEnumerable] make PowerShell
+        # enumerate a HashSet (or call a missing ToArray) before the function runs.
+        $Names
     )
     $file = Join-Path $TargetDir '.skillbridge-managed.json'
-    $arr = @($Names | Where-Object { $_ } | Sort-Object)
-    $escaped = foreach ($n in $arr) {
-        '"' + (($n -replace '\\', '\\') -replace '"', '\"') + '"'
+    $list = New-Object 'System.Collections.Generic.List[string]'
+    if ($null -ne $Names) {
+        foreach ($n in $Names) {
+            if ($n) { $list.Add([string]$n) }
+        }
+    }
+    $list.Sort()
+    $escaped = foreach ($n in $list) {
+        '"' + ([string]$n).Replace('\', '\\').Replace('"', '\"') + '"'
     }
     $json = '{ "skills": [' + ($escaped -join ', ') + '] }'
     [IO.File]::WriteAllText($file, $json, (New-Object System.Text.UTF8Encoding($false)))
