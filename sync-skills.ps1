@@ -36,8 +36,13 @@ if (-not (Test-Path $src)) {
     Write-Host "        Is CC Switch installed? Set the correct path in config.json (source)." -ForegroundColor Yellow
     exit 1
 }
+# Underscore-prefixed directories are archives (`_archived/...`), never skills.
+# Same rule as check-db-sync.py so the two views of the source cannot drift.
 $skills = Get-ChildItem -Path $src -Directory -ErrorAction SilentlyContinue |
-    Where-Object { Test-Path (Join-Path $_.FullName 'SKILL.md') }
+    Where-Object {
+        -not $_.Name.StartsWith('_') -and
+        (Test-Path (Join-Path $_.FullName 'SKILL.md'))
+    }
 if ($skills.Count -eq 0) {
     Write-Host "[ERROR] no skills found in source dir: $src (no subfolder contains SKILL.md)" -ForegroundColor Red
     exit 1

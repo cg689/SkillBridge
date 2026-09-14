@@ -2,7 +2,7 @@
 
 # SkillBridge — CC Switch Skill Sync
 
-把 **CC Switch**（`~/.cc-switch/skills`）里的全部 Agent Skill 自动同步到 Claude Code / Gemini CLI / Cline / Kilo Code / ZCode / WorkBuddy / Comate / Hermes Agent / TRAE 等其他编程工具。
+把 **CC Switch**（`~/.cc-switch/skills`）里的全部 Agent Skill 自动同步到 **23 个**编程工具：Claude Code、Cursor、Gemini CLI、Cline、Kilo Code、ZCode、WorkBuddy、Comate、Hermes Agent、TRAE 等。
 
 同步方式是**目录联接（Windows junction）/ 符号链接（Unix symlink）**，不是拷贝——所以 CC Switch 里对 skill 的**修改和删除会实时反映**到所有工具；新增的 skill 则由"自动补链"（Windows 计划任务 / Unix launchd·cron）在登录/开机时（或按设定的周期）自动接过去。
 
@@ -13,7 +13,7 @@
 
 ## 它解决了什么
 
-- 各 AI 编程工具（ZCode、WorkBuddy、Comate、TRAE、Cherry Studio、Hermes 等）各自维护一套 `skills/` 目录，手动拷贝 skill 又慢又容易漂移。
+- 各 AI 编程工具（Cursor、ZCode、WorkBuddy、Comate、TRAE、Cherry Studio、Hermes 等）各自维护一套 `skills/` 目录，手动拷贝 skill 又慢又容易漂移。
 - 本项目让 **CC Switch 成为唯一真源**，其他工具通过"活链接"实时跟随，新增 skill 也无需逐个手动安装。
 
 ## 原理（三个部件）
@@ -41,15 +41,18 @@
 ```
 SkillBridge/
 ├── 同步CCSwitch技能.bat    # 双击即同步（日常用法）
-├── detect-tools.ps1        # 自动探测本机已装工具并生成 config.json（适配新电脑）
+├── detect-tools.ps1        # 自动探测本机已装工具并生成 config.json（Windows）
+├── detect-tools.sh         # 同上（macOS / Linux）
 ├── sync-skills.ps1         # Windows 同步脚本（junction）
 ├── sync-skills.sh          # Unix 同步脚本（symlink）
 ├── check-db-sync.py        # 对齐 CC Switch 技能数据库（同步末尾自动调用）
 ├── install-autolink.ps1    # Windows：注册计划任务
 ├── install-autolink.sh     # Unix：注册 launchd / crontab
-├── config.json             # 本机生成（detect-tools.ps1），不入库
-├── config.example.json     # 可移植配置示例（基于环境变量）
+├── supported-tools.json    # 支持的工具目录（detect-tools 的唯一真源）
+├── config.json             # 本机生成（detect-tools），不入库
+├── config.example.json     # 可移植配置示例（含全部目标）
 ├── 支持的软件列表.md         # 当前支持的应用与技能目录清单
+├── tests/                  # 冒烟测试 + 目录/数据库对齐检查
 ├── README.md / README.zh-CN.md
 ├── LICENSE                 # MIT
 └── .gitignore
@@ -75,20 +78,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-autolink.ps1
 macOS / Linux：
 
 ```bash
-chmod +x sync-skills.sh install-autolink.sh
+chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
+./detect-tools.sh           # 为本机生成 config.json（或复制 config.example.json）
 ./sync-skills.sh            # 手动同步
 ./install-autolink.sh       # 注册自启（macOS 登录时 / Linux 开机时）
 ```
 
 ## 配置（config.json）
 
-> `config.json` 是**本机专属且不入库**（已加入 .gitignore）。用 `detect-tools.ps1` 生成，或把 `config.example.json` 复制为 `config.json` 后自行编辑；入库模板是 `config.example.json`。
+> `config.json` 是**本机专属且不入库**（已加入 .gitignore）。用 `detect-tools.ps1` / `detect-tools.sh` 生成，或把 `config.example.json` 复制为 `config.json` 后自行编辑；入库模板是 `config.example.json`，工具名单以 `supported-tools.json` 为准。
 
 ```json
 {
   "link_type": "junction",
   "source": "%USERPROFILE%\\.cc-switch\\skills",
   "targets": {
+    "Claude Code": "%USERPROFILE%\\.claude\\skills",
+    "Cursor":         "%USERPROFILE%\\.cursor\\skills",
     "ZCode":          "%USERPROFILE%\\.zcode\\skills",
     "WorkBuddy":      "%USERPROFILE%\\.workbuddy\\skills",
     "Comate":         "%USERPROFILE%\\.comate\\skills",
@@ -116,14 +122,17 @@ chmod +x sync-skills.sh install-autolink.sh
 
 1. **复制整个 SkillBridge 文件夹**到新电脑（或 `git clone`）。
 2. **Hermes Agent**：如果要用，把环境变量 `HERMES_HOME` 设成它的数据目录（该目录下需有 `skills` 文件夹）。
-3. **自动探测**：运行 `detect-tools.ps1`，它会检查本机装了哪些支持的软件，自动生成只含这些软件的 `config.json`（想全部纳入用 `-All` 参数）：
+3. **自动探测**：运行 `detect-tools.ps1`（Windows）或 `detect-tools.sh`（macOS / Linux），它会检查本机装了哪些支持的软件，自动生成只含这些软件的 `config.json`（想全部纳入用 `-All` / `--all`）：
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\detect-tools.ps1
    ```
-4. **同步**：双击 `同步CCSwitch技能.bat`（或运行 `sync-skills.ps1`）。
-5. （可选）注册登录自动补链：`install-autolink.ps1`。
+   ```bash
+   ./detect-tools.sh
+   ```
+4. **同步**：双击 `同步CCSwitch技能.bat`（或运行 `sync-skills.ps1` / `./sync-skills.sh`）。
+5. （可选）注册登录自动补链：`install-autolink.ps1` / `install-autolink.sh`。
 
-macOS / Linux 同理：`sync-skills.sh` 会自动把 `%USERPROFILE%` 映射到 `$HOME`、`%APPDATA%` 映射到 `~/.config`。
+macOS / Linux 同理：`sync-skills.sh` 会自动把 `%USERPROFILE%` 映射到 `$HOME`、`%APPDATA%` 映射到 `~/.config`。完整名单见 [支持的软件列表.md](支持的软件列表.md)。
 
 ## 常见问题
 
@@ -135,6 +144,9 @@ macOS / Linux 同理：`sync-skills.sh` 会自动把 `%USERPROFILE%` 映射到 `
 
 **某工具不认 junction / symlink？**
 把该工具从 `targets` 里去掉，或用拷贝方案（自行把 `New-Item -ItemType Junction` 换成 `Copy-Item -Recurse`）。
+
+**支持 Cursor 吗？**
+支持。用户级目标是 `~/.cursor/skills`（也是 Cursor 同步给 Cloud Agent 的唯一目录）。Cursor 为兼容还会读取 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills`；如果这些也在 `targets` 里，同一 skill 可能出现多次——不需要的那几行从配置里删掉即可。
 
 **删除 CC Switch 里的 skill 后目标目录残留失效链接？**
 脚本会自动清理（汇总里的 `pruned=` 即清理数量）。判定依据是链接记录的目标路径已不存在；非链接的真实目录一律不动，所以工具自己装的 skill 不会被误删。

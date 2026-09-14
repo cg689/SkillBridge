@@ -13,7 +13,7 @@ Security fixes are applied to the latest release.
 
 Please **do not open a public issue** for security vulnerabilities. Instead,
 report them privately by emailing the maintainer, or open a
-[private security advisory](https://github.com/your-name/SkillBridge/security/advisories/new)
+[private security advisory](https://github.com/cg689/SkillBridge/security/advisories/new)
 on GitHub.
 
 Please include:

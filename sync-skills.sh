@@ -26,8 +26,10 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 # Read the config in ONE python pass: line 1 = expanded source dir, following
-# lines = expanded target dirs. A target whose env var is unset is skipped with
-# a warning on stderr (not counted); a broken source aborts the whole run.
+# lines = "<tool name><TAB><expanded dir>". A target whose env var is unset is
+# skipped with a warning on stderr (not counted); a broken source aborts the
+# whole run. Tool names travel with the path so logs don't collapse to
+# `basename(dir)` (which is almost always "skills").
 read_config() {
     python3 - "$CONFIG" <<'PY'
 import json, sys, os
@@ -49,9 +51,9 @@ def norm(v):
     return v
 
 print(norm(cfg["source"]))
-for v in cfg.get("targets", {}).values():
+for name, v in cfg.get("targets", {}).items():
     try:
-        print(norm(v))
+        print("%s\t%s" % (name.replace("\t", " "), norm(v)))
     except ValueError as e:
         print("WARN target skipped: %s" % e, file=sys.stderr)
 PY
@@ -67,7 +69,16 @@ if [ ${#CONFIG_LINES[@]} -lt 1 ]; then
     exit 1
 fi
 SRC="${CONFIG_LINES[0]}"
-TARGETS=("${CONFIG_LINES[@]:1}")
+# Remaining lines are "<tool name><TAB><path>". Split once so names may contain spaces.
+TARGET_NAMES=()
+TARGET_DIRS=()
+if [ ${#CONFIG_LINES[@]} -gt 1 ]; then
+    for line in "${CONFIG_LINES[@]:1}"; do
+        [ -z "$line" ] && continue
+        TARGET_NAMES+=("${line%%$'\t'*}")
+        TARGET_DIRS+=("${line#*$'\t'}")
+    done
+fi
 
 if [ ! -d "$SRC" ]; then
     echo "[ERROR] source dir not found: $SRC" >&2
@@ -82,12 +93,21 @@ failed=0
 skill_count=0
 
 for skill in "$SRC"/*/; do
+    [ -d "$skill" ] || continue
+    name="$(basename "$skill")"
+    # Underscore-prefixed directories are archives (`_archived/...`), never skills.
+    # Same rule as check-db-sync.py so the two views of the source cannot drift.
+    case "$name" in
+        _*) continue ;;
+    esac
     [ -f "$skill/SKILL.md" ] || continue
     skill_count=$((skill_count+1))
-    name="$(basename "$skill")"
 
-    if [ ${#TARGETS[@]} -gt 0 ]; then
-        for tdir in "${TARGETS[@]}"; do
+    if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
+        i=0
+        for tdir in "${TARGET_DIRS[@]}"; do
+            tool="${TARGET_NAMES[$i]}"
+            i=$((i+1))
             [ -z "$tdir" ] && continue
             mkdir -p "$tdir"
             link="$tdir/$name"
@@ -97,13 +117,13 @@ for skill in "$SRC"/*/; do
             fi
             if err="$(ln -s "$skill" "$link" 2>&1)"; then
                 created=$((created+1))
-                echo "created  $(basename "$tdir") : $name" >> "$LOG"
+                echo "created  $tool : $name" >> "$LOG"
             elif printf '%s' "$err" | grep -qi 'exists'; then
                 # lost a race with a concurrent run — treat as already linked
                 skipped=$((skipped+1))
             else
                 failed=$((failed+1))
-                echo "FAILED   $(basename "$tdir") : $name -> $err" >> "$LOG"
+                echo "FAILED   $tool : $name -> $err" >> "$LOG"
             fi
         done
     fi
@@ -116,18 +136,32 @@ fi
 
 # Prune dead links — entries left behind when a skill is deleted from the source.
 # The loop above only walks skills that still exist, so it can never see them.
-for tdir in "${TARGETS[@]}"; do
-    [ -z "$tdir" ] && continue
-    [ -d "$tdir" ] || continue
-    for link in "$tdir"/*; do
-        # Only symlinks are ours to remove; a real folder belongs to the tool.
-        if [ -L "$link" ] && [ ! -e "$link" ]; then
-            rm -f "$link"
-            pruned=$((pruned+1))
-            echo "pruned   $(basename "$tdir") : $(basename "$link")" >> "$LOG"
-        fi
+# Match Windows: only symlinks are ours to remove; compare the recorded target
+# (readlink) rather than the link path itself.
+if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
+    i=0
+    for tdir in "${TARGET_DIRS[@]}"; do
+        tool="${TARGET_NAMES[$i]}"
+        i=$((i+1))
+        [ -z "$tdir" ] && continue
+        [ -d "$tdir" ] || continue
+        for link in "$tdir"/*; do
+            [ -e "$link" ] || [ -L "$link" ] || continue
+            if [ -L "$link" ]; then
+                target="$(readlink "$link")"
+                case "$target" in
+                    /*) abs="$target" ;;
+                    *)  abs="$(cd "$(dirname "$link")" && pwd)/$target" ;;
+                esac
+                if [ -n "$target" ] && [ ! -e "$abs" ]; then
+                    rm -f "$link"
+                    pruned=$((pruned+1))
+                    echo "pruned   $tool : $(basename "$link")" >> "$LOG"
+                fi
+            fi
+        done
     done
-done
+fi
 
 echo "== done $(date '+%Y-%m-%d %H:%M:%S') | created=$created pruned=$pruned skipped=$skipped failed=$failed ==" | tee -a "$LOG"
 

@@ -1,0 +1,120 @@
+{
+  "$comment": "SkillBridge tool catalog — single source of truth for detect-tools.ps1 / detect-tools.sh and config.example.json. Marker is the directory that proves the tool is installed; Skills is the live-link destination.",
+  "tools": [
+    {
+      "name": "Claude Code",
+      "marker": "%USERPROFILE%\\.claude",
+      "skills": "%USERPROFILE%\\.claude\\skills"
+    },
+    {
+      "name": "Cursor",
+      "marker": "%USERPROFILE%\\.cursor",
+      "skills": "%USERPROFILE%\\.cursor\\skills"
+    },
+    {
+      "name": "Gemini CLI",
+      "marker": "%USERPROFILE%\\.gemini",
+      "skills": "%USERPROFILE%\\.gemini\\skills"
+    },
+    {
+      "name": "Cline",
+      "marker": "%USERPROFILE%\\.cline",
+      "skills": "%USERPROFILE%\\.cline\\skills"
+    },
+    {
+      "name": "Kilo Code",
+      "marker": "%USERPROFILE%\\.kilo",
+      "skills": "%USERPROFILE%\\.kilo\\skills"
+    },
+    {
+      "name": "ZCode",
+      "marker": "%USERPROFILE%\\.zcode",
+      "skills": "%USERPROFILE%\\.zcode\\skills"
+    },
+    {
+      "name": "WorkBuddy",
+      "marker": "%USERPROFILE%\\.workbuddy",
+      "skills": "%USERPROFILE%\\.workbuddy\\skills"
+    },
+    {
+      "name": "WorkBuddy AI",
+      "marker": "%USERPROFILE%\\.workbuddy-ai",
+      "skills": "%USERPROFILE%\\.workbuddy-ai\\skills"
+    },
+    {
+      "name": "Comate",
+      "marker": "%USERPROFILE%\\.comate",
+      "skills": "%USERPROFILE%\\.comate\\skills"
+    },
+    {
+      "name": "Hermes Agent",
+      "marker": "%HERMES_HOME%",
+      "skills": "%HERMES_HOME%\\skills"
+    },
+    {
+      "name": "TRAE Work CN",
+      "marker": "%USERPROFILE%\\.trae-cn",
+      "skills": "%USERPROFILE%\\.trae-cn\\skills"
+    },
+    {
+      "name": "Cherry Studio",
+      "marker": "%APPDATA%\\CherryStudio",
+      "skills": "%APPDATA%\\CherryStudio\\Data\\Skills"
+    },
+    {
+      "name": "CodeBuddy CN",
+      "marker": "%USERPROFILE%\\.codebuddy",
+      "skills": "%USERPROFILE%\\.codebuddy\\skills"
+    },
+    {
+      "name": "Codex CLI / DeepSeek",
+      "marker": "%USERPROFILE%\\.agents",
+      "skills": "%USERPROFILE%\\.agents\\skills"
+    },
+    {
+      "name": "Codex",
+      "marker": "%USERPROFILE%\\.codex",
+      "skills": "%USERPROFILE%\\.codex\\skills"
+    },
+    {
+      "name": "OpenCode",
+      "marker": "%USERPROFILE%\\.config\\opencode",
+      "skills": "%USERPROFILE%\\.config\\opencode\\skills"
+    },
+    {
+      "name": "AutoClaw",
+      "marker": "%USERPROFILE%\\.openclaw-autoclaw",
+      "skills": "%USERPROFILE%\\.openclaw-autoclaw\\skills"
+    },
+    {
+      "name": "Verdent",
+      "marker": "%USERPROFILE%\\.verdent",
+      "skills": "%USERPROFILE%\\.verdent\\skills"
+    },
+    {
+      "name": "Qoder CN",
+      "marker": "%USERPROFILE%\\.qoder-cn",
+      "skills": "%USERPROFILE%\\.qoder-cn\\skills"
+    },
+    {
+      "name": "Doubao",
+      "marker": "%USERPROFILE%\\DoubaoWork",
+      "skills": "%USERPROFILE%\\DoubaoWork\\skills"
+    },
+    {
+      "name": "MiniMax Code",
+      "marker": "%USERPROFILE%\\.minimax",
+      "skills": "%USERPROFILE%\\.minimax\\skills"
+    },
+    {
+      "name": "Qwen Office",
+      "marker": "%USERPROFILE%\\.qwenworkcn",
+      "skills": "%USERPROFILE%\\.qwenworkcn\\skills"
+    },
+    {
+      "name": "Grok Bot",
+      "marker": "%USERPROFILE%\\.grok",
+      "skills": "%USERPROFILE%\\.grok\\skills"
+    }
+  ]
+}

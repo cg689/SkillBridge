@@ -31,6 +31,20 @@ import time
 DEFAULT_SOURCE = os.path.join(os.path.expanduser("~"), ".cc-switch", "skills")
 DEFAULT_DB = os.path.join(os.path.expanduser("~"), ".cc-switch", "cc-switch.db")
 
+# Destination toggles used when registering a skill that CC Switch never saw.
+# SkillBridge's own job is the filesystem links; these flags only affect
+# whether CC Switch also pushes the skill to its built-in destinations.
+# Codex and Hermes default on because unregistered local skills were dropping
+# out of those two; unknown future `enabled_*` columns default to 0.
+DEFAULT_ENABLED = {
+    "enabled_claude": 0,
+    "enabled_codex": 1,
+    "enabled_gemini": 0,
+    "enabled_opencode": 0,
+    "enabled_hermes": 1,
+    "enabled_grokbuild": 0,
+}
+
 
 class _Tee:
     """Mirror stdout into a log file.
@@ -200,16 +214,14 @@ def main():
                 "repo_name": None,
                 "repo_branch": None,
                 "readme_url": None,
-                "enabled_claude": 0,
-                "enabled_codex": 1,
-                "enabled_gemini": 0,
-                "enabled_opencode": 0,
-                "enabled_hermes": 1,
-                "enabled_grokbuild": 0,
                 "installed_at": int(os.stat(skill_md).st_ctime),
                 "content_hash": compute_hash(skill_md),
                 "updated_at": 0,
             }
+            record.update(DEFAULT_ENABLED)
+            for column in columns:
+                if column.startswith("enabled_") and column not in record:
+                    record[column] = 0
             conn.execute(
                 f"INSERT OR REPLACE INTO skills ({','.join(columns)}) VALUES ({placeholders})",
                 [record.get(column) for column in columns],

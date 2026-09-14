@@ -14,14 +14,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Validate example config
+      - name: Validate JSON configs
         run: |
           python - <<'EOF'
           import json
-          with open("config.example.json", encoding="utf-8") as fh:
-              json.load(fh)
-          print("config.example.json: OK")
+          for name in ("config.example.json", "supported-tools.json"):
+              with open(name, encoding="utf-8") as fh:
+                  json.load(fh)
+              print(f"{name}: OK")
           EOF
+      - name: Catalog + database-alignment tests
+        run: |
+          python tests/test-catalog.py
+          python tests/test-check-db-sync.py
 
   powershell:
     name: Lint + smoke test (Windows)
@@ -60,6 +65,7 @@ jobs:
         run: |
           bash -n sync-skills.sh
           bash -n install-autolink.sh
+          bash -n detect-tools.sh
           bash -n tests/smoke-unix.sh
           echo "Bash syntax OK"
       - name: Shellcheck
