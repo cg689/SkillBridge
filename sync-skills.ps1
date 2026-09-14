@@ -160,7 +160,7 @@ foreach ($t in $targetList) {
     }
 
     if ($t.Mode -eq 'copy') {
-        Write-ManagedSkills -TargetDir $tdir -Names @($managed)
+        Write-ManagedSkills -TargetDir $tdir -Names ([string[]]$managed.ToArray())
     }
 }
 

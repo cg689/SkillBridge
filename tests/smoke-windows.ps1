@@ -27,24 +27,23 @@ New-Item -ItemType Directory -Path $deadTarget -Force | Out-Null
 New-Item -ItemType Junction -Path (Join-Path $tmp 'tgt\dead-skill') -Target $deadTarget | Out-Null
 Remove-Item -LiteralPath $deadTarget -Recurse -Force
 
-# Hand-written JSON with forward slashes (Windows accepts them). Do not put
-# raw `\` in JSON strings: `\r` in `\runneradmin` and `\t` in `\Temp` are
-# real JSON escapes and corrupt the path.
-$jpath = { param($s) (([string]$s) -replace '\\', '/') }
-$cfgJson = @(
-    '{',
-    '  "link_type": "junction",',
-    '  "source": "' + (& $jpath (Join-Path $tmp 'src')) + '",',
-    '  "targets": {',
-    '    "Smoke": "' + (& $jpath (Join-Path $tmp 'tgt')) + '",',
-    '    "SmokeCopy": { "path": "' + (& $jpath (Join-Path $tmp 'tgt-copy')) + '", "mode": "copy" },',
-    '    "BadTool": "%NOPE_UNSET_VAR%/skills"',
-    '  },',
-    '  "check_db": false',
-    '}'
-) -join "`n"
+$cfg = @{
+    link_type = 'junction'
+    source    = (Join-Path $tmp 'src')
+    targets   = @{
+        Smoke     = (Join-Path $tmp 'tgt')
+        SmokeCopy = @{
+            path = (Join-Path $tmp 'tgt-copy')
+            mode = 'copy'
+        }
+        BadTool   = '%NOPE_UNSET_VAR%\skills'
+    }
+    # The DB check compares `source` against the real cc-switch.db. Off here, or
+    # a throwaway source would look like mass drift and get "repaired" into it.
+    check_db  = $false
+} | ConvertTo-Json -Depth 8
 $cfgPath = Join-Path $tmp 'cfg.json'
-[System.IO.File]::WriteAllText($cfgPath, $cfgJson, (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText($cfgPath, $cfg, (New-Object System.Text.UTF8Encoding($false)))
 
 try {
     # start from an empty log so this run's lines are easy to grep; finally restores it
