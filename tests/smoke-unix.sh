@@ -55,6 +55,7 @@ cat > "$TMP/cfg.json" <<EOF
   "source": "$SRC",
   "targets": {
     "Smoke": "$TGT",
+    "SmokeCopy": { "path": "$TGT-copy", "mode": "copy" },
     "BadHome": "%HERMES_HOME%\\\\skills"
   },
   "check_db": false
@@ -72,6 +73,14 @@ if ! bash "$ROOT/sync-skills.sh" "$TMP/cfg.json" >/dev/null 2>"$TMP/stderr.log";
 fi
 if [ ! -L "$TGT/demo-skill" ]; then
     echo "FAIL: symlink not created at $TGT/demo-skill" >&2
+    exit 1
+fi
+if [ -L "$TGT-copy/demo-skill" ] || [ ! -f "$TGT-copy/demo-skill/SKILL.md" ]; then
+    echo "FAIL: copy-mode dest must be a real directory with SKILL.md" >&2
+    exit 1
+fi
+if [ ! -f "$TGT-copy/.skillbridge-managed.json" ]; then
+    echo "FAIL: copy-mode dest is missing .skillbridge-managed.json" >&2
     exit 1
 fi
 if [ -e "$TGT/_archived" ] || [ -L "$TGT/_archived" ]; then
@@ -107,8 +116,8 @@ if ! grep -q 'pruned   Smoke : dead-skill' "$LOG"; then
 fi
 
 out="$(bash "$ROOT/sync-skills.sh" "$TMP/cfg.json" 2>/dev/null)"
-if ! printf '%s\n' "$out" | grep -q 'skipped=1'; then
-    echo "FAIL: second run not idempotent (expected skipped=1, got: $out)" >&2
+if ! printf '%s\n' "$out" | grep -q 'skipped=2'; then
+    echo "FAIL: second run not idempotent (expected skipped=2, got: $out)" >&2
     exit 1
 fi
 if ! printf '%s\n' "$out" | grep -q 'pruned=0'; then
@@ -116,7 +125,41 @@ if ! printf '%s\n' "$out" | grep -q 'pruned=0'; then
     exit 1
 fi
 
-echo "OK: unix smoke (link created, idempotent, archive skipped, dead link pruned, tool name logged)"
+echo "# demo-v2" > "$SRC/demo-skill/SKILL.md"
+out="$(bash "$ROOT/sync-skills.sh" "$TMP/cfg.json" 2>/dev/null)"
+if ! printf '%s\n' "$out" | grep -q 'updated=1'; then
+    echo "FAIL: copy target should refresh after SKILL.md change (got: $out)" >&2
+    exit 1
+fi
+if ! grep -q 'demo-v2' "$TGT-copy/demo-skill/SKILL.md"; then
+    echo "FAIL: copied SKILL.md was not refreshed" >&2
+    exit 1
+fi
+
+mkdir -p "$SRC/gone-skill"
+echo "# gone" > "$SRC/gone-skill/SKILL.md"
+bash "$ROOT/sync-skills.sh" "$TMP/cfg.json" >/dev/null
+rm -rf "$SRC/gone-skill"
+out="$(bash "$ROOT/sync-skills.sh" "$TMP/cfg.json" 2>/dev/null)"
+if ! printf '%s\n' "$out" | grep -q 'pruned=2'; then
+    echo "FAIL: expected pruned=2 after deleting gone-skill (link+copy), got: $out" >&2
+    exit 1
+fi
+if [ -e "$TGT-copy/gone-skill" ] || [ -L "$TGT/gone-skill" ]; then
+    echo "FAIL: gone-skill was not pruned from copy/link targets" >&2
+    exit 1
+fi
+
+if ! bash "$ROOT/sync-skills.sh" --copy-into "$TMP/proj/.cursor/skills" "$TMP/cfg.json" >/dev/null; then
+    echo "FAIL: --copy-into exited non-zero" >&2
+    exit 1
+fi
+if [ -L "$TMP/proj/.cursor/skills/demo-skill" ] || [ ! -f "$TMP/proj/.cursor/skills/demo-skill/SKILL.md" ]; then
+    echo "FAIL: --copy-into did not materialize a real skill directory" >&2
+    exit 1
+fi
+
+echo "OK: unix smoke (link+copy, idempotent, archive skipped, dead/stale pruned, tool name logged, --copy-into)"
 
 # detect-tools.sh --all writes a config that includes every catalogued tool
 if ! bash "$ROOT/detect-tools.sh" --all >/dev/null; then
@@ -127,8 +170,9 @@ if ! python3 - "$REPO_CONFIG" <<'PY'
 import json, sys
 cfg = json.load(open(sys.argv[1], encoding="utf-8"))
 targets = cfg.get("targets") or {}
-if "Cursor" not in targets:
-    sys.exit("FAIL: detect-tools.sh --all did not include Cursor")
+cur = targets.get("Cursor")
+if not (isinstance(cur, dict) and cur.get("mode") == "copy"):
+    sys.exit("FAIL: detect-tools.sh --all Cursor must be copy mode, got %r" % cur)
 if cfg.get("link_type") != "symlink":
     sys.exit("FAIL: detect-tools.sh should default link_type=symlink, got %r" % cfg.get("link_type"))
 if len(targets) < 1:

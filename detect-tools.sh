@@ -84,7 +84,10 @@ for tool in tools:
     unresolved = "%" in marker
     present = (not unresolved) and os.path.exists(marker)
     if all_flag or present:
-        targets[name] = tool["skills"]
+        if tool.get("mode"):
+            targets[name] = {"path": tool["skills"], "mode": tool["mode"]}
+        else:
+            targets[name] = tool["skills"]
         found.append(name)
     else:
         missed.append(name)

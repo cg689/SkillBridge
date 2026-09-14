@@ -84,7 +84,7 @@ chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
   "source": "%USERPROFILE%\\.cc-switch\\skills",
   "targets": {
     "Claude Code": "%USERPROFILE%\\.claude\\skills",
-    "Cursor":         "%USERPROFILE%\\.cursor\\skills",
+    "Cursor":         { "path": "%USERPROFILE%\\.cursor\\skills", "mode": "copy" },
     "ZCode":          "%USERPROFILE%\\.zcode\\skills",
     "WorkBuddy":      "%USERPROFILE%\\.workbuddy\\skills",
     "Comate":         "%USERPROFILE%\\.comate\\skills",
@@ -101,8 +101,8 @@ chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
 ```
 
 - `source` — the CC Switch skills library (`%USERPROFILE%\.cc-switch\skills` on Windows, `$HOME/.cc-switch/skills` on Unix).
-- `targets` — a `name → skills directory` map. Add a tool in one line; `%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%` (Windows) and `$HOME` (Unix) are expanded automatically.
-- `link_type` — `junction` (Windows, no admin required) or `symlink` (Unix).
+- `targets` — a `name → skills directory` map. A value can be a path string (link) or `{ "path": "...", "mode": "copy" }` for tools that cannot follow junctions (Cursor). `%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%` (Windows) and `$HOME` (Unix) are expanded automatically. Relative paths like `.cursor/skills` are resolved from the current directory.
+- `link_type` — `junction` (Windows, no admin required) or `symlink` (Unix). Used only for `mode: link` targets.
 
 See [支持的软件列表.md](支持的软件列表.md) for the full list of supported tools and their default paths. The catalog file [`supported-tools.json`](supported-tools.json) is the source of truth used by both detect-tools scripts.
 
@@ -158,7 +158,24 @@ Tools re-scan their skills directory on session/UI restart — restart the tool.
 Remove it from `targets`, or switch to a copy strategy (replace `New-Item -ItemType Junction` with `Copy-Item -Recurse`).
 
 **Does SkillBridge support Cursor?**
-Yes. The user-level target is `~/.cursor/skills` (this is also the only directory Cursor syncs to Cloud Agents). Cursor additionally loads `~/.claude/skills`, `~/.codex/skills` and `~/.agents/skills` for compatibility, so if those tools are in `targets` too, the same skill may show up more than once — drop the extras you don't want.
+Yes. The user-level target is `~/.cursor/skills`, and it uses **copy mode** (real directories, not junctions). Cursor does not follow symlinks when discovering skills or when uploading them via *Sync Skills for Cloud Agents*, so a live link would be invisible in Cloud Agents.
+
+Cloud Agents still run on a separate VM and cannot see your laptop. After SkillBridge copies skills into `~/.cursor/skills`:
+
+1. Turn on **Settings → Agents → Sync Skills for Cloud Agents**, then start the agent from the desktop Agents Window; or
+2. Materialize skills into the repo so the checkout has them:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-skills.ps1 -CopyInto .\.cursor\skills
+```
+
+```bash
+./sync-skills.sh --copy-into ./.cursor/skills
+```
+
+Commit `.cursor/skills/` (reliable for `cursor.com/agents`) or keep it gitignored and rely on an environment snapshot / `environment.json` install script. Agents started from the website or Grok Bot may not receive user-level synced skills even when the toggle is on.
+
+Cursor additionally loads `~/.claude/skills`, `~/.codex/skills` and `~/.agents/skills` for compatibility, so if those tools are in `targets` too, the same skill may show up more than once locally — drop the extras you don't want.
 
 **Stale links left behind after deleting a CC Switch skill?**
 They are pruned automatically (reported as `pruned=` in the summary). The rule is "links only": an entry is removed when it is a link whose recorded target no longer exists. A real directory is never touched, so a tool's own skills stay safe.

@@ -8,9 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Cursor (`%USERPROFILE%\.cursor\skills`) as a first-class target. This is
-  Cursor's user-level skills directory and the only path it syncs to Cloud
-  Agents. 23 targets in total.
+- Cursor (`%USERPROFILE%\.cursor\skills`) as a first-class target. 23 targets
+  in total. Cursor uses **copy mode** (real directories): Cloud Agents and
+  Cursor's own skill discovery do not follow junctions/symlinks, so a live
+  link in `~/.cursor/skills` is invisible remotely.
+- Per-target `"mode": "copy"` (`{ "path": "...", "mode": "copy" }`) plus
+  `sync-skills.ps1 -CopyInto` / `sync-skills.sh --copy-into` to materialize
+  skills into a repo's `.cursor/skills` for Cloud Agent checkouts.
+- Managed-copy bookkeeping (`.skillbridge-managed.json`) so refreshes and
+  deletes never touch a tool's own skills.
 - `detect-tools.sh`: Unix counterpart of `detect-tools.ps1`.
 - `supported-tools.json`: single catalog for detect-tools (both platforms)
   and `config.example.json`, with a CI check that the lists cannot drift.

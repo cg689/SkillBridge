@@ -94,7 +94,7 @@ chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
   "source": "%USERPROFILE%\\.cc-switch\\skills",
   "targets": {
     "Claude Code": "%USERPROFILE%\\.claude\\skills",
-    "Cursor":         "%USERPROFILE%\\.cursor\\skills",
+    "Cursor":         { "path": "%USERPROFILE%\\.cursor\\skills", "mode": "copy" },
     "ZCode":          "%USERPROFILE%\\.zcode\\skills",
     "WorkBuddy":      "%USERPROFILE%\\.workbuddy\\skills",
     "Comate":         "%USERPROFILE%\\.comate\\skills",
@@ -111,8 +111,8 @@ chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
 ```
 
 - `source`：CC Switch 技能库路径。Windows 上默认 `%USERPROFILE%\.cc-switch\skills`，Unix 上默认 `$HOME/.cc-switch/skills`。
-- `targets`：`名称 → 技能目录` 的映射。想接入新工具，在这里加一行即可；`%USERPROFILE%`、`%APPDATA%`、`%HERMES_HOME%`（Windows）/ `$HOME`（Unix）会被自动展开。
-- `link_type`：`junction`（Windows 目录联接，无需管理员权限）/ `symlink`（Unix）。
+- `targets`：`名称 → 技能目录` 的映射。值可以是路径字符串（链接），或 `{ "path": "...", "mode": "copy" }`（拷贝真实文件，给不能跟随 junction 的工具，例如 Cursor）。`%USERPROFILE%`、`%APPDATA%`、`%HERMES_HOME%`（Windows）/ `$HOME`（Unix）会自动展开。相对路径（如 `.cursor/skills`）相对当前目录解析。
+- `link_type`：`junction`（Windows 目录联接，无需管理员权限）/ `symlink`（Unix）。只作用于 `mode: link` 的目标。
 
 > 提示：如果某工具的技能目录实际路径不同，直接把 `targets` 里对应行的目录改成工具真正读取的位置即可。
 
@@ -145,8 +145,25 @@ macOS / Linux 同理：`sync-skills.sh` 会自动把 `%USERPROFILE%` 映射到 `
 **某工具不认 junction / symlink？**
 把该工具从 `targets` 里去掉，或用拷贝方案（自行把 `New-Item -ItemType Junction` 换成 `Copy-Item -Recurse`）。
 
-**支持 Cursor 吗？**
-支持。用户级目标是 `~/.cursor/skills`（也是 Cursor 同步给 Cloud Agent 的唯一目录）。Cursor 为兼容还会读取 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills`；如果这些也在 `targets` 里，同一 skill 可能出现多次——不需要的那几行从配置里删掉即可。
+**支持 Cursor 吗？为什么云端项目调用不到本地 skill？**
+支持。用户级目标是 `~/.cursor/skills`，并且默认是 **copy 模式**（拷贝真实目录，不是 junction/symlink）。Cursor 发现 skill、以及「Sync Skills for Cloud Agents」上传时都**不会跟随符号链接**，所以活链接在云端等于不存在。
+
+Cloud Agent 跑在独立虚拟机里，看不到你电脑上的 `~/.cc-switch`。SkillBridge 把 skill 拷进 `~/.cursor/skills` 之后还要任选其一：
+
+1. 打开 **Settings → Agents → Sync Skills for Cloud Agents**，并从桌面 Agents 窗口启动（从 cursor.com / Grok Bot 启动的云端任务目前经常拿不到用户级同步）；或
+2. 把 skill 落到仓库里，让云端 checkout 就能读到：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-skills.ps1 -CopyInto .\.cursor\skills
+```
+
+```bash
+./sync-skills.sh --copy-into ./.cursor/skills
+```
+
+把 `.cursor/skills/` 提交进 git 最稳；不想入库就加入 `.gitignore`，改用环境快照或 `environment.json` 的安装脚本拷到虚拟机的 `~/.cursor/skills`。
+
+Cursor 为兼容还会读取 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills`；这些若也在 `targets` 里，本地可能看到重复——不需要的行删掉即可。
 
 **删除 CC Switch 里的 skill 后目标目录残留失效链接？**
 脚本会自动清理（汇总里的 `pruned=` 即清理数量）。判定依据是链接记录的目标路径已不存在；非链接的真实目录一律不动，所以工具自己装的 skill 不会被误删。

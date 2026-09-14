@@ -4,7 +4,10 @@
   "source": "%USERPROFILE%\\.cc-switch\\skills",
   "targets": {
     "Claude Code": "%USERPROFILE%\\.claude\\skills",
-    "Cursor": "%USERPROFILE%\\.cursor\\skills",
+    "Cursor": {
+      "path": "%USERPROFILE%\\.cursor\\skills",
+      "mode": "copy"
+    },
     "Gemini CLI": "%USERPROFILE%\\.gemini\\skills",
     "Cline": "%USERPROFILE%\\.cline\\skills",
     "Kilo Code": "%USERPROFILE%\\.kilo\\skills",

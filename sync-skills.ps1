@@ -11,8 +11,10 @@
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-skills.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-skills.ps1 -ConfigPath .\my-config.json
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-skills.ps1 -CopyInto .\.cursor\skills
 param(
-    [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json')
+    [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json'),
+    [string]$CopyInto = ''
 )
 $ErrorActionPreference = 'Continue'
 
@@ -55,25 +57,87 @@ if ($linkType -eq 'SymbolicLink') {
         "admin / Developer Mode on Windows.") -ForegroundColor Yellow
 }
 
+$targetList = @()
+if ($config.targets) {
+    foreach ($entry in $config.targets.PSObject.Properties) {
+        $spec = Get-TargetSpec $entry.Value
+        $targetList += [pscustomobject]@{ Name = $entry.Name; Path = $spec.Path; Mode = $spec.Mode }
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($CopyInto)) {
+    $targetList += [pscustomobject]@{ Name = 'CopyInto'; Path = $CopyInto; Mode = 'copy' }
+}
+
+$skillNames = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+foreach ($s in $skills) { [void]$skillNames.Add($s.Name) }
+
 $lines   = @()
 $created = 0
+$updated = 0
 $pruned  = 0
 $skipped = 0
 $failed  = 0
 
-foreach ($entry in $config.targets.PSObject.Properties) {
-    $tool = $entry.Name
-    $tdir = Expand-EnvPath ([string]$entry.Value)
+foreach ($t in $targetList) {
+    $tool = $t.Name
+    $tdir = Resolve-TargetPath $t.Path
     if (-not (Assert-ExpandablePath $tdir "target '$tool'")) {
         continue
     }
     if (-not (Test-Path $tdir)) {
         New-Item -ItemType Directory -Path $tdir -Force | Out-Null
     }
+    $managed = Read-ManagedSkills $tdir
+
+    if ($t.Mode -eq 'copy') {
+        # Drop copies / leftover junctions we own whose source skill is gone.
+        foreach ($item in @(Get-ChildItem -Path $tdir -Force -ErrorAction SilentlyContinue)) {
+            if ($item.Name -eq '.skillbridge-managed.json') { continue }
+            if (-not (Test-OurSkillEntry $item $src $managed)) { continue }
+            if ($skillNames.Contains($item.Name)) { continue }
+            Remove-SkillEntry $item.FullName
+            [void]$managed.Remove($item.Name)
+            if (-not (Test-Path -LiteralPath $item.FullName)) {
+                $pruned++
+                $lines += "pruned   $tool : $($item.Name)"
+            }
+        }
+    }
+
     foreach ($s in $skills) {
-        $link = Join-Path $tdir $s.Name
-        # skip if anything already exists there (including a dangling junction)
-        $existing = Get-Item -Path $link -Force -ErrorAction SilentlyContinue
+        $dest = Join-Path $tdir $s.Name
+        $existing = Get-Item -Path $dest -Force -ErrorAction SilentlyContinue
+        if ($t.Mode -eq 'copy') {
+            $ours = Test-OurSkillEntry $existing $src $managed
+            if ($null -ne $existing -and -not $ours) {
+                $skipped++
+                continue
+            }
+            if ($null -ne $existing -and $ours -and -not $existing.LinkType) {
+                if ((Get-SkillFingerprint $s.FullName) -eq (Get-SkillFingerprint $existing.FullName)) {
+                    $skipped++
+                    [void]$managed.Add($s.Name)
+                    continue
+                }
+            }
+            try {
+                Copy-SkillDirectory -Source $s.FullName -Destination $dest
+                if ($null -ne $existing) {
+                    $updated++
+                    $lines += "updated  $tool : $($s.Name)"
+                } else {
+                    $created++
+                    $lines += "created  $tool : $($s.Name)"
+                }
+                [void]$managed.Add($s.Name)
+            } catch {
+                $failed++
+                $lines += "FAILED   $tool : $($s.Name) -> $($_.Exception.Message)"
+            }
+            continue
+        }
+
+        # link mode — skip if anything already exists (including a dangling junction)
         if ($null -ne $existing) {
             $skipped++
             continue
@@ -82,7 +146,7 @@ foreach ($entry in $config.targets.PSObject.Properties) {
             # -ErrorAction Stop so real failures reach catch (EAP is 'Continue').
             # A concurrent run may create the link between our check and this
             # call; treat that as "already there" (skip), not as a failure.
-            New-Item -ItemType $linkType -Path $link -Target $s.FullName -ErrorAction Stop | Out-Null
+            New-Item -ItemType $linkType -Path $dest -Target $s.FullName -ErrorAction Stop | Out-Null
             $created++
             $lines += "created  $tool : $($s.Name)"
         } catch {
@@ -94,14 +158,20 @@ foreach ($entry in $config.targets.PSObject.Properties) {
             }
         }
     }
+
+    if ($t.Mode -eq 'copy') {
+        Write-ManagedSkills -TargetDir $tdir -Names $managed
+    }
 }
 
 # Prune dead links — entries left behind when a skill is deleted from the source.
 # The loop above only walks skills that still exist, so it can never see them;
 # without this pass, deleted skills linger in every target as broken links.
-foreach ($entry in $config.targets.PSObject.Properties) {
-    $tool = $entry.Name
-    $tdir = Expand-EnvPath ([string]$entry.Value)
+# Copy-mode targets are pruned above (managed copies, not just links).
+foreach ($t in $targetList) {
+    if ($t.Mode -eq 'copy') { continue }
+    $tool = $t.Name
+    $tdir = Resolve-TargetPath $t.Path
     if (-not (Test-Path $tdir)) { continue }
     foreach ($item in @(Get-ChildItem -Path $tdir -Force -ErrorAction SilentlyContinue)) {
         # Only links are ours to remove; a real folder belongs to the tool.
@@ -115,11 +185,7 @@ foreach ($entry in $config.targets.PSObject.Properties) {
         # closed on a link whose target is already gone (it cannot resolve the
         # path in order to trash it). The raw API unlinks the entry without
         # ever touching the target, which is what we want here.
-        try {
-            [System.IO.Directory]::Delete($item.FullName, $false)
-        } catch {
-            try { [System.IO.File]::Delete($item.FullName) } catch { }
-        }
+        Remove-SkillEntry $item.FullName
         if (-not (Test-Path -LiteralPath $item.FullName)) {
             $pruned++
             $lines += "pruned   $tool : $($item.Name)"
@@ -129,7 +195,7 @@ foreach ($entry in $config.targets.PSObject.Properties) {
 
 $summary = @(
     "== done $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    " | skills=$($skills.Count) created=$created pruned=$pruned skipped=$skipped failed=$failed =="
+    " | skills=$($skills.Count) created=$created updated=$updated pruned=$pruned skipped=$skipped failed=$failed =="
 ) -join ''
 $lines += $summary
 Write-Log -Lines $lines -Path $log

@@ -47,11 +47,28 @@ def main():
             % (count_match.group(1), len(catalog_names))
         )
 
+    def target_path(value):
+        if isinstance(value, dict):
+            return value.get("path") or value.get("skills")
+        return value
+
     required_fields = ("name", "marker", "skills")
     for tool in catalog["tools"]:
         for field in required_fields:
             if not tool.get(field):
                 errors.append("catalog entry %r missing %s" % (tool, field))
+        example_val = example["targets"].get(tool["name"])
+        if target_path(example_val) != tool["skills"]:
+            errors.append(
+                "example path for %s is %r, catalog skills is %r"
+                % (tool["name"], example_val, tool["skills"])
+            )
+        if tool.get("mode"):
+            if not isinstance(example_val, dict) or example_val.get("mode") != tool["mode"]:
+                errors.append(
+                    "example %s must be {path, mode=%r}, got %r"
+                    % (tool["name"], tool["mode"], example_val)
+                )
 
     if errors:
         print("FAIL: catalog drift")

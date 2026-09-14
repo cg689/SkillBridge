@@ -9,7 +9,8 @@
     {
       "name": "Cursor",
       "marker": "%USERPROFILE%\\.cursor",
-      "skills": "%USERPROFILE%\\.cursor\\skills"
+      "skills": "%USERPROFILE%\\.cursor\\skills",
+      "mode": "copy"
     },
     {
       "name": "Gemini CLI",

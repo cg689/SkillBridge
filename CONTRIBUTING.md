@@ -42,9 +42,10 @@ describing the use case and the expected behavior.
 1. Find where the tool stores its skills (install a skill in the tool and see
    which folder it writes to).
 2. Add an entry to [`supported-tools.json`](supported-tools.json) (`name`,
-   `marker`, `skills`). Prefer environment variables over hardcoded paths.
-   This is the source of truth: `detect-tools.ps1` and `detect-tools.sh` both
-   read it.
+   `marker`, `skills`, optional `mode`). Prefer environment variables over
+   hardcoded paths. Use `"mode": "copy"` when the tool cannot follow
+   junctions/symlinks (Cursor Cloud Agents are the example). This file is the
+   source of truth: `detect-tools.ps1` and `detect-tools.sh` both read it.
 3. Add the same `name → skills` line to `config.example.json` (CI fails if the
    two lists drift).
 4. Update `支持的软件列表.md` and the supported-tools mention in `README.md` /

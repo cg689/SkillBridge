@@ -29,6 +29,7 @@ $candidates = @(
             Name   = [string]$t.name
             Marker = [string]$t.marker
             Skills = [string]$t.skills
+            Mode   = if ($t.mode) { [string]$t.mode } else { '' }
         }
     }
 )
@@ -39,7 +40,11 @@ $missed = @()
 foreach ($c in $candidates) {
     $marker = Expand-EnvPath $c.Marker
     if ($All -or (Test-Path $marker)) {
-        $targets[$c.Name] = $c.Skills
+        if ($c.Mode) {
+            $targets[$c.Name] = @{ path = $c.Skills; mode = $c.Mode }
+        } else {
+            $targets[$c.Name] = $c.Skills
+        }
         $found += $c.Name
     } else {
         $missed += $c.Name
@@ -84,8 +89,16 @@ function ConvertTo-SkillBridgeConfig {
     $names = @($Targets.Keys)
     for ($i = 0; $i -lt $names.Count; $i++) {
         $comma = if ($i -lt $names.Count - 1) { ',' } else { '' }
-        $line = '    "' + (& $esc $names[$i]) + '": "'
-        $line += (& $esc ([string]$Targets[$names[$i]])) + '"' + $comma
+        $val = $Targets[$names[$i]]
+        if ($val -is [hashtable] -or ($null -ne $val -and $null -ne $val.mode)) {
+            $tPath = if ($val.path) { [string]$val.path } else { [string]$val.skills }
+            $tMode = [string]$val.mode
+            $line = '    "' + (& $esc $names[$i]) + '": { "path": "'
+            $line += (& $esc $tPath) + '", "mode": "' + (& $esc $tMode) + '" }' + $comma
+        } else {
+            $line = '    "' + (& $esc $names[$i]) + '": "'
+            $line += (& $esc ([string]$val)) + '"' + $comma
+        }
         [void]$sb.AppendLine($line)
     }
     [void]$sb.AppendLine('  },')

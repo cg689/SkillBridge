@@ -31,8 +31,12 @@ $cfg = @{
     link_type = 'junction'
     source    = (Join-Path $tmp 'src')
     targets   = @{
-        Smoke   = (Join-Path $tmp 'tgt')
-        BadTool = '%NOPE_UNSET_VAR%\skills'
+        Smoke     = (Join-Path $tmp 'tgt')
+        SmokeCopy = @{
+            path = (Join-Path $tmp 'tgt-copy')
+            mode = 'copy'
+        }
+        BadTool   = '%NOPE_UNSET_VAR%\skills'
     }
     # The DB check compares `source` against the real cc-switch.db. Off here, or
     # a throwaway source would look like mass drift and get "repaired" into it.
@@ -47,8 +51,8 @@ try {
 
     # run 1: link created; unresolved-%VAR% target skipped (not counted, no literal dir)
     $out1 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
-    if ($out1 -notmatch 'created=1') {
-        throw "FAIL: first run expected created=1, got: $out1"
+    if ($out1 -notmatch 'created=2') {
+        throw "FAIL: first run expected created=2 (link+copy), got: $out1"
     }
     if ($out1 -notmatch 'pruned=1') {
         throw "FAIL: first run expected pruned=1, got: $out1"
@@ -69,6 +73,13 @@ try {
     if (-not (Test-Path (Join-Path $tmp 'tgt\own-skill'))) {
         throw "FAIL: tool's own real directory was removed"
     }
+    $copied = Get-Item (Join-Path $tmp 'tgt-copy\demo-skill') -Force
+    if ($copied.LinkType) {
+        throw 'FAIL: copy-mode dest must be a real directory, not a link'
+    }
+    if (-not (Test-Path (Join-Path $tmp 'tgt-copy\demo-skill\SKILL.md'))) {
+        throw 'FAIL: copy-mode dest missing SKILL.md'
+    }
     $logText = Get-Content $log -Raw
     if ($logText -notmatch 'created  Smoke : demo-skill') {
         throw "FAIL: log did not record tool name 'Smoke': $logText"
@@ -79,13 +90,33 @@ try {
 
     # run 2: idempotent
     $out2 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
-    if ($out2 -notmatch 'skipped=1') {
-        throw "FAIL: second run not idempotent (expected skipped=1, got: $out2)"
+    if ($out2 -notmatch 'skipped=2') {
+        throw "FAIL: second run not idempotent (expected skipped=2, got: $out2)"
     }
     if ($out2 -notmatch 'pruned=0') {
         throw "FAIL: second run expected pruned=0, got: $out2"
     }
-    Write-Host 'OK: windows smoke (junction created, idempotent, archive skipped, dead link pruned)'
+    Set-Content -Path (Join-Path $tmp 'src\demo-skill\SKILL.md') -Value '# demo-v2' -Encoding UTF8
+    $out3 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
+    if ($out3 -notmatch 'updated=1') {
+        throw "FAIL: copy target should refresh after SKILL.md change, got: $out3"
+    }
+    $copiedText = Get-Content (Join-Path $tmp 'tgt-copy\demo-skill\SKILL.md') -Raw
+    if ($copiedText -notmatch 'demo-v2') {
+        throw 'FAIL: copied SKILL.md was not refreshed'
+    }
+
+    $copyInto = Join-Path $tmp 'proj\.cursor\skills'
+    $out4 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath -CopyInto $copyInto
+    if (-not (Test-Path (Join-Path $copyInto 'demo-skill\SKILL.md'))) {
+        throw "FAIL: -CopyInto did not materialize a real skill directory (got: $out4)"
+    }
+    $copyIntoItem = Get-Item (Join-Path $copyInto 'demo-skill') -Force
+    if ($copyIntoItem.LinkType) {
+        throw 'FAIL: -CopyInto created a link instead of a real directory'
+    }
+
+    Write-Host 'OK: windows smoke (junction+copy, idempotent, archive skipped, dead link pruned, -CopyInto)'
 
     # detect-tools: produces a valid config.json that includes Cursor
     & (Join-Path $root 'detect-tools.ps1') -All | Out-Null
@@ -95,6 +126,9 @@ try {
     }
     if (-not $gen.targets.Cursor) {
         throw 'FAIL: detect-tools -All did not include Cursor'
+    }
+    if ($gen.targets.Cursor.mode -ne 'copy') {
+        throw "FAIL: detect-tools Cursor must be copy mode, got: $($gen.targets.Cursor)"
     }
     Write-Host 'OK: detect-tools'
 } finally {
