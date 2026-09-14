@@ -1,20 +1,34 @@
 {
-  "$comment": "SkillBridge — portable example (env-var paths resolve on any machine). Copy to config.json or run detect-tools.ps1 to generate one for this machine.",
+  "$comment": "SkillBridge — portable example (env-var paths resolve on any machine). Copy to config.json or run detect-tools.ps1 / detect-tools.sh to generate one for this machine. Target list matches supported-tools.json.",
   "link_type": "junction",
   "source": "%USERPROFILE%\\.cc-switch\\skills",
   "targets": {
     "Claude Code": "%USERPROFILE%\\.claude\\skills",
+    "Cursor": {
+      "path": "%USERPROFILE%\\.cursor\\skills",
+      "mode": "copy"
+    },
     "Gemini CLI": "%USERPROFILE%\\.gemini\\skills",
     "Cline": "%USERPROFILE%\\.cline\\skills",
     "Kilo Code": "%USERPROFILE%\\.kilo\\skills",
     "ZCode": "%USERPROFILE%\\.zcode\\skills",
     "WorkBuddy": "%USERPROFILE%\\.workbuddy\\skills",
+    "WorkBuddy AI": "%USERPROFILE%\\.workbuddy-ai\\skills",
     "Comate": "%USERPROFILE%\\.comate\\skills",
     "Hermes Agent": "%HERMES_HOME%\\skills",
     "TRAE Work CN": "%USERPROFILE%\\.trae-cn\\skills",
     "Cherry Studio": "%APPDATA%\\CherryStudio\\Data\\Skills",
+    "CodeBuddy CN": "%USERPROFILE%\\.codebuddy\\skills",
+    "Codex CLI / DeepSeek": "%USERPROFILE%\\.agents\\skills",
     "Codex": "%USERPROFILE%\\.codex\\skills",
-    "OpenCode": "%USERPROFILE%\\.config\\opencode\\skills"
+    "OpenCode": "%USERPROFILE%\\.config\\opencode\\skills",
+    "AutoClaw": "%USERPROFILE%\\.openclaw-autoclaw\\skills",
+    "Verdent": "%USERPROFILE%\\.verdent\\skills",
+    "Qoder CN": "%USERPROFILE%\\.qoder-cn\\skills",
+    "Doubao": "%USERPROFILE%\\DoubaoWork\\skills",
+    "MiniMax Code": "%USERPROFILE%\\.minimax\\skills",
+    "Qwen Office": "%USERPROFILE%\\.qwenworkcn\\skills",
+    "Grok Bot": "%USERPROFILE%\\.grok\\skills"
   },
   "autolink": {
     "enabled": true,

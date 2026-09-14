@@ -14,7 +14,7 @@
 
 ---
 
-SkillBridge mirrors the skills in **CC Switch** (`~/.cc-switch/skills`) into **20 AI coding tools** — Claude Code, Gemini CLI, Cline, Kilo Code, ZCode, WorkBuddy, Comate, Hermes Agent, TRAE, Cherry Studio, CodeBuddy, AutoClaw, Verdent, Qoder, Doubao, MiniMax, Qwen Office, Grok Bot and more — using **directory junctions (Windows) / symlinks (Unix)** instead of copies. Skills stay live: edits and removals in CC Switch propagate instantly, and new skills are auto-linked at logon (at boot on Linux).
+SkillBridge mirrors the skills in **CC Switch** (`~/.cc-switch/skills`) into **23 AI coding tools** — Claude Code, Cursor, Gemini CLI, Cline, Kilo Code, ZCode, WorkBuddy, Comate, Hermes Agent, TRAE, Cherry Studio, CodeBuddy, AutoClaw, Verdent, Qoder, Doubao, MiniMax, Qwen Office, Grok Bot, Codex, OpenCode and more — using **directory junctions (Windows) / symlinks (Unix)** instead of copies. Skills stay live: edits and removals in CC Switch propagate instantly, and new skills are auto-linked at logon (at boot on Linux).
 
 ## Why SkillBridge?
 
@@ -31,7 +31,7 @@ Every AI coding tool maintains its own `skills/` directory. Copying skills aroun
 
 - Live sync via junctions / symlinks — no periodic re-copying
 - Config-driven targets (`config.json`) — add or drop a tool in one line
-- Auto-detection (`detect-tools.ps1`) — adapts to whatever is installed on a machine
+- Auto-detection (`detect-tools.ps1` / `detect-tools.sh`) — adapts to whatever is installed on a machine
 - Auto-link at logon / boot (`install-autolink.ps1` / `.sh`) with optional interval
 - Cross-platform: PowerShell (Windows) and Bash (macOS / Linux)
 - Pure scripts, no daemon; Windows needs nothing extra, macOS / Linux need `python3` (for config parsing)
@@ -56,7 +56,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-autolink.ps1
 macOS / Linux:
 
 ```bash
-chmod +x sync-skills.sh install-autolink.sh
+chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
+./detect-tools.sh         # generate config.json for this machine (or copy config.example.json)
 ./sync-skills.sh          # sync once
 ./install-autolink.sh     # register auto-link (macOS: at login / Linux: at boot)
 ```
@@ -69,19 +70,21 @@ chmod +x sync-skills.sh install-autolink.sh
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\detect-tools.ps1
    ```
-   (Use `-All` to include every supported tool regardless of detection.)
+   On macOS / Linux: `./detect-tools.sh`. Use `-All` / `--all` to include every supported tool regardless of detection.
 4. Double-click `同步CCSwitch技能.bat` (or run `sync-skills.ps1`).
 5. Optional: `install-autolink.ps1` for automatic sync at logon.
 
 ## Configuration (`config.json`)
 
-> `config.json` is **machine-specific and not committed** (gitignored). Generate it with `detect-tools.ps1`, or copy `config.example.json` → `config.json` and edit. The committed template is `config.example.json`.
+> `config.json` is **machine-specific and not committed** (gitignored). Generate it with `detect-tools.ps1` / `detect-tools.sh`, or copy `config.example.json` → `config.json` and edit. The committed template is `config.example.json`; the tool list is defined in `supported-tools.json`.
 
 ```json
 {
   "link_type": "junction",
   "source": "%USERPROFILE%\\.cc-switch\\skills",
   "targets": {
+    "Claude Code": "%USERPROFILE%\\.claude\\skills",
+    "Cursor":         { "path": "%USERPROFILE%\\.cursor\\skills", "mode": "copy" },
     "ZCode":          "%USERPROFILE%\\.zcode\\skills",
     "WorkBuddy":      "%USERPROFILE%\\.workbuddy\\skills",
     "Comate":         "%USERPROFILE%\\.comate\\skills",
@@ -98,10 +101,10 @@ chmod +x sync-skills.sh install-autolink.sh
 ```
 
 - `source` — the CC Switch skills library (`%USERPROFILE%\.cc-switch\skills` on Windows, `$HOME/.cc-switch/skills` on Unix).
-- `targets` — a `name → skills directory` map. Add a tool in one line; `%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%` (Windows) and `$HOME` (Unix) are expanded automatically.
-- `link_type` — `junction` (Windows, no admin required) or `symlink` (Unix).
+- `targets` — a `name → skills directory` map. A value can be a path string (link) or `{ "path": "...", "mode": "copy" }` for tools that cannot follow junctions (Cursor). `%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%` (Windows) and `$HOME` (Unix) are expanded automatically. Relative paths like `.cursor/skills` are resolved from the current directory.
+- `link_type` — `junction` (Windows, no admin required) or `symlink` (Unix). Used only for `mode: link` targets.
 
-See [支持的软件列表.md](支持的软件列表.md) for the full list of supported tools and their default paths.
+See [支持的软件列表.md](支持的软件列表.md) for the full list of supported tools and their default paths. The catalog file [`supported-tools.json`](supported-tools.json) is the source of truth used by both detect-tools scripts.
 
 ## How It Works
 
@@ -126,15 +129,18 @@ See [支持的软件列表.md](支持的软件列表.md) for the full list of su
 ```
 SkillBridge/
 ├── 同步CCSwitch技能.bat    # double-click to sync (daily driver)
-├── detect-tools.ps1        # auto-detect installed tools -> generate config.json
+├── detect-tools.ps1        # auto-detect installed tools -> generate config.json (Windows)
+├── detect-tools.sh         # same on macOS / Linux
 ├── sync-skills.ps1         # Windows sync script (junctions)
 ├── sync-skills.sh          # Unix sync script (symlinks)
 ├── check-db-sync.py        # reconcile CC Switch's skill DB (called by sync)
 ├── install-autolink.ps1    # Windows: register scheduled task
 ├── install-autolink.sh     # Unix: register launchd / crontab
-├── config.json             # generated per machine (run detect-tools.ps1); gitignored
-├── config.example.json     # portable env-var based example
+├── supported-tools.json    # catalog of supported tools (source of truth)
+├── config.json             # generated per machine (run detect-tools); gitignored
+├── config.example.json     # portable env-var based example (all targets)
 ├── 支持的软件列表.md         # supported tools & paths (中文)
+├── tests/                  # smoke tests + catalog / DB-alignment checks
 ├── .github/workflows/      # CI
 ├── README.md / README.zh-CN.md
 └── LICENSE                 # MIT
@@ -150,6 +156,26 @@ Tools re-scan their skills directory on session/UI restart — restart the tool.
 
 **A tool doesn't follow junctions / symlinks?**
 Remove it from `targets`, or switch to a copy strategy (replace `New-Item -ItemType Junction` with `Copy-Item -Recurse`).
+
+**Does SkillBridge support Cursor?**
+Yes. The user-level target is `~/.cursor/skills`, and it uses **copy mode** (real directories, not junctions). Cursor does not follow symlinks when discovering skills or when uploading them via *Sync Skills for Cloud Agents*, so a live link would be invisible in Cloud Agents.
+
+Cloud Agents still run on a separate VM and cannot see your laptop. After SkillBridge copies skills into `~/.cursor/skills`:
+
+1. Turn on **Settings → Agents → Sync Skills for Cloud Agents**, then start the agent from the desktop Agents Window; or
+2. Materialize skills into the repo so the checkout has them:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-skills.ps1 -CopyInto .\.cursor\skills
+```
+
+```bash
+./sync-skills.sh --copy-into ./.cursor/skills
+```
+
+Commit `.cursor/skills/` (reliable for `cursor.com/agents`) or keep it gitignored and rely on an environment snapshot / `environment.json` install script. Agents started from the website or Grok Bot may not receive user-level synced skills even when the toggle is on.
+
+Cursor additionally loads `~/.claude/skills`, `~/.codex/skills` and `~/.agents/skills` for compatibility, so if those tools are in `targets` too, the same skill may show up more than once locally — drop the extras you don't want.
 
 **Stale links left behind after deleting a CC Switch skill?**
 They are pruned automatically (reported as `pruned=` in the summary). The rule is "links only": an entry is removed when it is a link whose recorded target no longer exists. A real directory is never touched, so a tool's own skills stay safe.

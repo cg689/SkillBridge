@@ -1,8 +1,9 @@
 # detect-tools.ps1 — auto-generate config.json for the CURRENT machine.
 #
-# Detects which supported tools are installed (by checking each tool's config
-# directory) and writes a config.json that only includes the ones present.
-# This is how you adapt SkillBridge to another computer:
+# Detects which supported tools are installed (by checking each tool's marker
+# directory from supported-tools.json) and writes a config.json that only
+# includes the ones present. This is how you adapt SkillBridge to another
+# computer:
 #   clone -> set HERMES_HOME if you use Hermes Agent -> run this -> double-click 同步CCSwitch技能.bat
 #
 # Usage:
@@ -14,118 +15,22 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'common.psm1') -Force
 $configPath = Join-Path $PSScriptRoot 'config.json'
+$catalogPath = Join-Path $PSScriptRoot 'supported-tools.json'
 
-# name -> @{ Marker = config dir that proves the tool is installed; Skills = skills dir template }
+# Single source of truth: supported-tools.json (shared with detect-tools.sh).
+$catalog = Read-ConfigFile $catalogPath
+if ($null -eq $catalog -or $null -eq $catalog.tools -or $catalog.tools.Count -lt 1) {
+    Write-Host "[ERROR] catalog missing or empty: $catalogPath" -ForegroundColor Red
+    exit 1
+}
 $candidates = @(
-    @{
-        Name   = 'Claude Code'
-        Marker = '%USERPROFILE%\.claude'
-        Skills = '%USERPROFILE%\.claude\skills'
-    }
-    @{
-        Name   = 'Gemini CLI'
-        Marker = '%USERPROFILE%\.gemini'
-        Skills = '%USERPROFILE%\.gemini\skills'
-    }
-    @{
-        Name   = 'Cline'
-        Marker = '%USERPROFILE%\.cline'
-        Skills = '%USERPROFILE%\.cline\skills'
-    }
-    @{
-        Name   = 'Kilo Code'
-        Marker = '%USERPROFILE%\.kilo'
-        Skills = '%USERPROFILE%\.kilo\skills'
-    }
-    @{
-        Name   = 'ZCode'
-        Marker = '%USERPROFILE%\.zcode'
-        Skills = '%USERPROFILE%\.zcode\skills'
-    }
-    @{
-        Name   = 'WorkBuddy'
-        Marker = '%USERPROFILE%\.workbuddy'
-        Skills = '%USERPROFILE%\.workbuddy\skills'
-    }
-    @{
-        Name   = 'WorkBuddy AI'
-        Marker = '%USERPROFILE%\.workbuddy-ai'
-        Skills = '%USERPROFILE%\.workbuddy-ai\skills'
-    }
-    @{
-        Name   = 'Comate'
-        Marker = '%USERPROFILE%\.comate'
-        Skills = '%USERPROFILE%\.comate\skills'
-    }
-    @{
-        Name   = 'Hermes Agent'
-        Marker = '%HERMES_HOME%'
-        Skills = '%HERMES_HOME%\skills'
-    }
-    @{
-        Name   = 'TRAE Work CN'
-        Marker = '%USERPROFILE%\.trae-cn'
-        Skills = '%USERPROFILE%\.trae-cn\skills'
-    }
-    @{
-        Name   = 'Cherry Studio'
-        Marker = '%APPDATA%\CherryStudio'
-        Skills = '%APPDATA%\CherryStudio\Data\Skills'
-    }
-    @{
-        Name   = 'CodeBuddy CN'
-        Marker = '%USERPROFILE%\.codebuddy'
-        Skills = '%USERPROFILE%\.codebuddy\skills'
-    }
-    @{
-        Name   = 'Codex CLI / DeepSeek'
-        Marker = '%USERPROFILE%\.agents'
-        Skills = '%USERPROFILE%\.agents\skills'
-    }
-    @{
-        Name   = 'Codex'
-        Marker = '%USERPROFILE%\.codex'
-        Skills = '%USERPROFILE%\.codex\skills'
-    }
-    @{
-        Name   = 'OpenCode'
-        Marker = '%USERPROFILE%\.config\opencode'
-        Skills = '%USERPROFILE%\.config\opencode\skills'
-    }
-    @{
-        Name   = 'AutoClaw'
-        Marker = '%USERPROFILE%\.openclaw-autoclaw'
-        Skills = '%USERPROFILE%\.openclaw-autoclaw\skills'
-    }
-    @{
-        Name   = 'Verdent'
-        Marker = '%USERPROFILE%\.verdent'
-        Skills = '%USERPROFILE%\.verdent\skills'
-    }
-    @{
-        Name   = 'Qoder CN'
-        Marker = '%USERPROFILE%\.qoder-cn'
-        Skills = '%USERPROFILE%\.qoder-cn\skills'
-    }
-    @{
-        Name   = 'Doubao'
-        Marker = '%USERPROFILE%\DoubaoWork'
-        Skills = '%USERPROFILE%\DoubaoWork\skills'
-    }
-    @{
-        Name   = 'MiniMax Code'
-        Marker = '%USERPROFILE%\.minimax'
-        Skills = '%USERPROFILE%\.minimax\skills'
-    }
-    @{
-        Name   = 'Qwen Office'
-        Marker = '%USERPROFILE%\.qwenworkcn'
-        Skills = '%USERPROFILE%\.qwenworkcn\skills'
-    }
-    @{
-        Name   = 'Grok Bot'
-        Marker = '%USERPROFILE%\.grok'
-        Skills = '%USERPROFILE%\.grok\skills'
+    foreach ($t in $catalog.tools) {
+        @{
+            Name   = [string]$t.name
+            Marker = [string]$t.marker
+            Skills = [string]$t.skills
+            Mode   = if ($t.mode) { [string]$t.mode } else { '' }
+        }
     }
 )
 
@@ -135,7 +40,11 @@ $missed = @()
 foreach ($c in $candidates) {
     $marker = Expand-EnvPath $c.Marker
     if ($All -or (Test-Path $marker)) {
-        $targets[$c.Name] = $c.Skills
+        if ($c.Mode) {
+            $targets[$c.Name] = @{ path = $c.Skills; mode = $c.Mode }
+        } else {
+            $targets[$c.Name] = $c.Skills
+        }
         $found += $c.Name
     } else {
         $missed += $c.Name
@@ -151,6 +60,7 @@ $cfgSource = if ($existing -and $existing.source) {
 } else {
     '%USERPROFILE%\.cc-switch\skills'
 }
+$cfgCheckDb = if ($existing -and $null -ne $existing.check_db) { [bool]$existing.check_db } else { $true }
 
 # Emit with a stable key order and 2-space indentation, matching config.example.json.
 # (PS5.1 ConvertTo-Json indents nested objects irregularly, so we serialize this
@@ -164,7 +74,7 @@ function ConvertTo-SkillBridgeConfig {
         $Autolink,
         [bool]$CheckDb = $true
     )
-    $esc = { param($s) ($s -replace '\\', '\\' -replace '"', '\"') }
+    $esc = { param($s) ([string]$s).Replace('\', '\\').Replace('"', '\"') }
     $d = Get-AutolinkDefaults $Autolink
     $enabled  = $d.enabled
     $atLogon  = $d.at_logon
@@ -179,8 +89,16 @@ function ConvertTo-SkillBridgeConfig {
     $names = @($Targets.Keys)
     for ($i = 0; $i -lt $names.Count; $i++) {
         $comma = if ($i -lt $names.Count - 1) { ',' } else { '' }
-        $line = '    "' + (& $esc $names[$i]) + '": "'
-        $line += (& $esc ([string]$Targets[$names[$i]])) + '"' + $comma
+        $val = $Targets[$names[$i]]
+        if ($val -is [hashtable] -or ($null -ne $val -and $null -ne $val.mode)) {
+            $tPath = if ($val.path) { [string]$val.path } else { [string]$val.skills }
+            $tMode = [string]$val.mode
+            $line = '    "' + (& $esc $names[$i]) + '": { "path": "'
+            $line += (& $esc $tPath) + '", "mode": "' + (& $esc $tMode) + '" }' + $comma
+        } else {
+            $line = '    "' + (& $esc $names[$i]) + '": "'
+            $line += (& $esc ([string]$val)) + '"' + $comma
+        }
         [void]$sb.AppendLine($line)
     }
     [void]$sb.AppendLine('  },')
@@ -200,6 +118,7 @@ $jsonParams = @{
     Source   = $cfgSource
     Targets  = $targets
     Autolink = $autolink
+    CheckDb  = $cfgCheckDb
 }
 $json = ConvertTo-SkillBridgeConfig @jsonParams
 

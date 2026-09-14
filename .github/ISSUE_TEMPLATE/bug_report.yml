@@ -18,7 +18,7 @@ body:
     id: script
     attributes:
       label: Which script
-      description: sync-skills.ps1 / sync-skills.sh / detect-tools.ps1 / install-autolink.* / 同步CCSwitch技能.bat
+        description: sync-skills.ps1 / sync-skills.sh / detect-tools.ps1 / detect-tools.sh / install-autolink.* / 同步CCSwitch技能.bat
     validations:
       required: true
   - type: textarea
