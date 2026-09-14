@@ -113,7 +113,7 @@ foreach ($t in $targetList) {
                 $skipped++
                 continue
             }
-            if ($null -ne $existing -and $ours -and -not $existing.LinkType) {
+            if ($null -ne $existing -and $ours -and -not (Test-ReparsePoint $existing)) {
                 if ((Get-SkillFingerprint $s.FullName) -eq (Get-SkillFingerprint $existing.FullName)) {
                     $skipped++
                     [void]$managed.Add($s.Name)

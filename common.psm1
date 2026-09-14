@@ -127,14 +127,33 @@ function Get-TargetSpec {
     return [pscustomobject]@{ Path = $path; Mode = $mode }
 }
 
+function Test-ReparsePoint {
+    param($Item)
+    # pwsh sometimes leaves LinkType empty on junctions; Attributes is reliable.
+    if ($null -eq $Item) { return $false }
+    if ($Item.LinkType) { return $true }
+    try {
+        return [bool]($Item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    } catch {
+        return $false
+    }
+}
+
 function Get-SkillFingerprint {
     param([string]$Dir)
-    # Cheap "did this skill change?" check: SKILL.md hash + file count.
-    # Hidden SkillBridge bookkeeping files are ignored.
+    # Cheap "did this skill change?" check: SKILL.md bytes + file count.
+    # Read bytes directly so we do not depend on Get-FileHash (EAP Continue
+    # can swallow a failure and yield two empty hashes that compare equal).
     $md = Join-Path $Dir 'SKILL.md'
-    $hash = ''
+    $hash = 'missing'
     if (Test-Path -LiteralPath $md) {
-        $hash = (Get-FileHash -LiteralPath $md -Algorithm SHA256).Hash
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $bytes = [IO.File]::ReadAllBytes($md)
+            $hash = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '')
+        } finally {
+            $sha.Dispose()
+        }
     }
     $count = @(Get-ChildItem -LiteralPath $Dir -Recurse -File -Force -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -ne '.skillbridge-copy' }).Count
@@ -177,15 +196,15 @@ function Test-OurSkillEntry {
     # A dest entry is "ours" if we recorded it, or if it is a link pointing
     # into the CC Switch source (left over from an older junction/symlink run).
     if ($null -eq $Item) { return $false }
-    if ($ManagedSet -and $ManagedSet.Contains($Item.Name)) { return $true }
-    if ($Item.LinkType) {
-        $t = [string]$Item.Target
-        if ($t) {
-            $normSrc = $SourceRoot.TrimEnd('\', '/')
-            $normT = $t.TrimEnd('\', '/')
-            if ($normT.StartsWith($normSrc, [StringComparison]::OrdinalIgnoreCase)) {
-                return $true
-            }
+    if ($ManagedSet -and $ManagedSet.Contains([string]$Item.Name)) { return $true }
+    $t = $null
+    if ($Item.LinkType) { $t = [string]$Item.Target }
+    elseif (Test-ReparsePoint $Item) { $t = [string]$Item.Target }
+    if ($t) {
+        $normSrc = $SourceRoot.TrimEnd('\', '/')
+        $normT = $t.TrimEnd('\', '/')
+        if ($normT.StartsWith($normSrc, [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
         }
     }
     return $false
@@ -196,24 +215,30 @@ function Copy-SkillDirectory {
         [string]$Source,
         [string]$Destination
     )
+    # Copy file-by-file. Copy-Item -Recurse of a directory can produce a
+    # reparse point on some Windows hosts; Cloud Agents cannot follow those.
     if (Test-Path -LiteralPath $Destination) {
-        $item = Get-Item -LiteralPath $Destination -Force
-        if ($item.LinkType) {
-            try { [IO.Directory]::Delete($item.FullName, $false) } catch {
-                try { [IO.File]::Delete($item.FullName) } catch { }
-            }
+        Remove-SkillEntry $Destination
+    }
+    [void][IO.Directory]::CreateDirectory($Destination)
+    foreach ($item in @(Get-ChildItem -LiteralPath $Source -Force -ErrorAction Stop)) {
+        $target = Join-Path $Destination $item.Name
+        if ($item.PSIsContainer) {
+            if (Test-ReparsePoint $item) { continue }
+            Copy-SkillDirectory -Source $item.FullName -Destination $target
         } else {
-            Remove-Item -LiteralPath $Destination -Recurse -Force
+            [IO.File]::Copy($item.FullName, $target, $true)
         }
     }
-    Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
 }
 
 function Remove-SkillEntry {
     param([string]$Path)
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if ($null -eq $item) { return }
-    if ($item.LinkType) {
+    # Never Remove-Item -Recurse a reparse point: it can walk into the target
+    # and delete the CC Switch source skill.
+    if (Test-ReparsePoint $item) {
         try { [IO.Directory]::Delete($item.FullName, $false) } catch {
             try { [IO.File]::Delete($item.FullName) } catch { }
         }

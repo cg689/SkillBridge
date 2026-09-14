@@ -27,23 +27,22 @@ New-Item -ItemType Directory -Path $deadTarget -Force | Out-Null
 New-Item -ItemType Junction -Path (Join-Path $tmp 'tgt\dead-skill') -Target $deadTarget | Out-Null
 Remove-Item -LiteralPath $deadTarget -Recurse -Force
 
-$cfg = @{
-    link_type = 'junction'
-    source    = (Join-Path $tmp 'src')
-    targets   = @{
-        Smoke     = (Join-Path $tmp 'tgt')
-        SmokeCopy = @{
-            path = (Join-Path $tmp 'tgt-copy')
-            mode = 'copy'
-        }
-        BadTool   = '%NOPE_UNSET_VAR%\skills'
-    }
-    # The DB check compares `source` against the real cc-switch.db. Off here, or
-    # a throwaway source would look like mass drift and get "repaired" into it.
-    check_db  = $false
-} | ConvertTo-Json -Depth 5
+# Hand-written JSON: ConvertTo-Json can mangle nested hashtables and hide mode=copy.
+$esc = { param($s) ($s -replace '\\', '\\' -replace '"', '\"') }
+$cfgJson = @(
+    '{',
+    '  "link_type": "junction",',
+    '  "source": "' + (& $esc (Join-Path $tmp 'src')) + '",',
+    '  "targets": {',
+    '    "Smoke": "' + (& $esc (Join-Path $tmp 'tgt')) + '",',
+    '    "SmokeCopy": { "path": "' + (& $esc (Join-Path $tmp 'tgt-copy')) + '", "mode": "copy" },',
+    '    "BadTool": "%NOPE_UNSET_VAR%\\skills"',
+    '  },',
+    '  "check_db": false',
+    '}'
+) -join "`n"
 $cfgPath = Join-Path $tmp 'cfg.json'
-[System.IO.File]::WriteAllText($cfgPath, $cfg, (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText($cfgPath, $cfgJson, (New-Object System.Text.UTF8Encoding($false)))
 
 try {
     # start from an empty log so this run's lines are easy to grep; finally restores it
@@ -74,11 +73,15 @@ try {
         throw "FAIL: tool's own real directory was removed"
     }
     $copied = Get-Item (Join-Path $tmp 'tgt-copy\demo-skill') -Force
-    if ($copied.LinkType) {
-        throw 'FAIL: copy-mode dest must be a real directory, not a link'
+    if ($copied.LinkType -or ($copied.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "FAIL: copy-mode dest must be a real directory (LinkType=$($copied.LinkType) Attributes=$($copied.Attributes))"
     }
     if (-not (Test-Path (Join-Path $tmp 'tgt-copy\demo-skill\SKILL.md'))) {
         throw 'FAIL: copy-mode dest missing SKILL.md'
+    }
+    $managed = Get-Content (Join-Path $tmp 'tgt-copy\.skillbridge-managed.json') -Raw
+    if ($managed -notmatch 'demo-skill') {
+        throw "FAIL: managed list missing demo-skill: $managed"
     }
     $logText = Get-Content $log -Raw
     if ($logText -notmatch 'created  Smoke : demo-skill') {
@@ -97,6 +100,10 @@ try {
         throw "FAIL: second run expected pruned=0, got: $out2"
     }
     Set-Content -Path (Join-Path $tmp 'src\demo-skill\SKILL.md') -Value '# demo-v2' -Encoding UTF8
+    $copyBefore = Get-Content (Join-Path $tmp 'tgt-copy\demo-skill\SKILL.md') -Raw
+    if ($copyBefore -match 'demo-v2') {
+        throw 'FAIL: copy dest changed when source was edited — dest is not an independent copy'
+    }
     $out3 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
     if ($out3 -notmatch 'updated=1') {
         throw "FAIL: copy target should refresh after SKILL.md change, got: $out3"
