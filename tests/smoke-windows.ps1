@@ -27,16 +27,18 @@ New-Item -ItemType Directory -Path $deadTarget -Force | Out-Null
 New-Item -ItemType Junction -Path (Join-Path $tmp 'tgt\dead-skill') -Target $deadTarget | Out-Null
 Remove-Item -LiteralPath $deadTarget -Recurse -Force
 
-# Hand-written JSON: ConvertTo-Json can mangle nested hashtables and hide mode=copy.
-$esc = { param($s) ($s -replace '\\', '\\' -replace '"', '\"') }
+# Hand-written JSON with forward slashes (Windows accepts them). Do not put
+# raw `\` in JSON strings: `\r` in `\runneradmin` and `\t` in `\Temp` are
+# real JSON escapes and corrupt the path.
+$jpath = { param($s) (([string]$s) -replace '\\', '/') }
 $cfgJson = @(
     '{',
     '  "link_type": "junction",',
-    '  "source": "' + (& $esc (Join-Path $tmp 'src')) + '",',
+    '  "source": "' + (& $jpath (Join-Path $tmp 'src')) + '",',
     '  "targets": {',
-    '    "Smoke": "' + (& $esc (Join-Path $tmp 'tgt')) + '",',
-    '    "SmokeCopy": { "path": "' + (& $esc (Join-Path $tmp 'tgt-copy')) + '", "mode": "copy" },',
-    '    "BadTool": "%NOPE_UNSET_VAR%\\skills"',
+    '    "Smoke": "' + (& $jpath (Join-Path $tmp 'tgt')) + '",',
+    '    "SmokeCopy": { "path": "' + (& $jpath (Join-Path $tmp 'tgt-copy')) + '", "mode": "copy" },',
+    '    "BadTool": "%NOPE_UNSET_VAR%/skills"',
     '  },',
     '  "check_db": false',
     '}'

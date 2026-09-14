@@ -74,7 +74,7 @@ function ConvertTo-SkillBridgeConfig {
         $Autolink,
         [bool]$CheckDb = $true
     )
-    $esc = { param($s) ($s -replace '\\', '\\' -replace '"', '\"') }
+    $esc = { param($s) ([string]$s).Replace('\', '\\').Replace('"', '\"') }
     $d = Get-AutolinkDefaults $Autolink
     $enabled  = $d.enabled
     $atLogon  = $d.at_logon
