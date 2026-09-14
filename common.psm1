@@ -98,6 +98,9 @@ function Resolve-TargetPath {
     # absolute one so copy-mode targets and --CopyInto work from any CWD.
     $expanded = Expand-EnvPath $Path
     if ([string]::IsNullOrWhiteSpace($expanded)) { return $expanded }
+    # Leave unresolved %VAR% paths alone so Assert-ExpandablePath can skip them
+    # (do not Join-Path them onto CWD or the warning shows a bogus absolute).
+    if ($expanded -match '%[A-Za-z_][A-Za-z0-9_]*%') { return $expanded }
     if (-not [IO.Path]::IsPathRooted($expanded)) {
         $expanded = [IO.Path]::GetFullPath((Join-Path (Get-Location) $expanded))
     }
@@ -152,7 +155,9 @@ function Read-ManagedSkills {
 function Write-ManagedSkills {
     param(
         [string]$TargetDir,
-        [System.Collections.IEnumerable]$Names
+        # string[] (not IEnumerable): PowerShell enumerates IEnumerable
+        # parameters, so a HashSet would be written as one letter per skill.
+        [string[]]$Names
     )
     $file = Join-Path $TargetDir '.skillbridge-managed.json'
     $arr = @($Names | Where-Object { $_ } | Sort-Object)
