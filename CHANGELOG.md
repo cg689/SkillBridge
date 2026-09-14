@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `C:\Users\Administrator\...` inventory.
 
 ### Fixed
+- Windows copy-mode bookkeeping: `Write-ManagedSkills` took `IEnumerable`,
+  so PowerShell split a HashSet into individual characters and later
+  refreshes treated our copies as foreign (skipped, never updated).
 - Unix sync log used `basename` of the skills directory, so every line said
   `created  skills : ...` instead of the tool name.
 - Sync scripts now skip `_`-prefixed source folders (archives), matching
