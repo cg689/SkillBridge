@@ -107,24 +107,84 @@ function Resolve-TargetPath {
     return $expanded
 }
 
+function Get-CopyMarkerName {
+    return '.skillbridge-copy'
+}
+
+function Test-CursorCopyTarget {
+    param(
+        [string]$Name,
+        [string]$Path
+    )
+    # Cursor (by name or ~/.cursor/skills path) cannot follow junctions.
+    # A leftover string target would keep creating a dead link for Cloud Agents.
+    if ($Name -and $Name.Equals('Cursor', [StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $norm = $Path.Replace('\', '/').TrimEnd('/')
+    if ($norm.EndsWith('/.cursor/skills', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if ($norm.Equals('.cursor/skills', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    return $false
+}
+
 function Get-TargetSpec {
-    param($Value)
+    param(
+        $Value,
+        [string]$Name = ''
+    )
     # A target is either a path string (link mode) or { path, mode } where
     # mode is "link" (junction/symlink) or "copy" (real files, for Cloud Agents).
+    # Cursor string paths are promoted to copy so an old config.json still works.
     if ($null -eq $Value) {
-        return [pscustomobject]@{ Path = ''; Mode = 'link' }
-    }
-    if ($Value -is [string]) {
-        return [pscustomobject]@{ Path = [string]$Value; Mode = 'link' }
+        return [pscustomobject]@{ Path = ''; Mode = 'link'; Promoted = $false }
     }
     $path = ''
-    if ($null -ne $Value.path) { $path = [string]$Value.path }
-    elseif ($null -ne $Value.skills) { $path = [string]$Value.skills }
     $mode = 'link'
-    if ($null -ne $Value.mode) { $mode = ([string]$Value.mode).ToLowerInvariant() }
-    if ($mode -in @('junction', 'symlink')) { $mode = 'link' }
-    if ($mode -ne 'copy') { $mode = 'link' }
-    return [pscustomobject]@{ Path = $path; Mode = $mode }
+    if ($Value -is [string]) {
+        $path = [string]$Value
+    } else {
+        if ($null -ne $Value.path) { $path = [string]$Value.path }
+        elseif ($null -ne $Value.skills) { $path = [string]$Value.skills }
+        if ($null -ne $Value.mode) { $mode = ([string]$Value.mode).ToLowerInvariant() }
+        if ($mode -in @('junction', 'symlink')) { $mode = 'link' }
+        if ($mode -ne 'copy') { $mode = 'link' }
+    }
+    $promoted = $false
+    if ($mode -ne 'copy' -and (Test-CursorCopyTarget -Name $Name -Path $path)) {
+        $mode = 'copy'
+        $promoted = $true
+    }
+    return [pscustomobject]@{ Path = $path; Mode = $mode; Promoted = $promoted }
+}
+
+function Test-SameResolvedPath {
+    param(
+        [string]$Left,
+        [string]$Right
+    )
+    if ([string]::IsNullOrWhiteSpace($Left) -or [string]::IsNullOrWhiteSpace($Right)) {
+        return $false
+    }
+    try {
+        $a = [IO.Path]::GetFullPath($Left.TrimEnd('\', '/'))
+        $b = [IO.Path]::GetFullPath($Right.TrimEnd('\', '/'))
+        return $a.Equals($b, [StringComparison]::OrdinalIgnoreCase)
+    } catch {
+        return $false
+    }
+}
+
+function Test-CopyMarker {
+    param([string]$Dir)
+    if ([string]::IsNullOrWhiteSpace($Dir)) { return $false }
+    return Test-Path -LiteralPath (Join-Path $Dir (Get-CopyMarkerName)) -PathType Leaf
+}
+
+function Write-CopyMarker {
+    param([string]$Dir)
+    $marker = Join-Path $Dir (Get-CopyMarkerName)
+    [IO.File]::WriteAllText($marker, "skillbridge-copy`n", (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Test-ReparsePoint {
@@ -141,23 +201,42 @@ function Test-ReparsePoint {
 
 function Get-SkillFingerprint {
     param([string]$Dir)
-    # Cheap "did this skill change?" check: SKILL.md bytes + file count.
+    # Hash every regular file except the copy marker, in relative-path order.
+    # The marker is dest-only, so including it would make every refresh a miss.
     # Read bytes directly so we do not depend on Get-FileHash (EAP Continue
     # can swallow a failure and yield two empty hashes that compare equal).
-    $md = Join-Path $Dir 'SKILL.md'
-    $hash = 'missing'
-    if (Test-Path -LiteralPath $md) {
-        $sha = [Security.Cryptography.SHA256]::Create()
-        try {
-            $bytes = [IO.File]::ReadAllBytes($md)
-            $hash = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '')
-        } finally {
-            $sha.Dispose()
+    if (-not (Test-Path -LiteralPath $Dir)) { return 'missing:0' }
+    $marker = Get-CopyMarkerName
+    $prefixLen = $Dir.TrimEnd('\', '/').Length
+    $files = @(Get-ChildItem -LiteralPath $Dir -Recurse -File -Force -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -ne $marker -and -not (Test-ReparsePoint $_)
+        } |
+        Sort-Object {
+            $_.FullName.Substring($prefixLen).TrimStart('\', '/').Replace('\', '/')
+        })
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $zero = [byte[]](0)
+        foreach ($f in $files) {
+            $rel = $f.FullName.Substring($prefixLen).TrimStart('\', '/').Replace('\', '/')
+            $relBytes = [Text.Encoding]::UTF8.GetBytes($rel)
+            if ($relBytes.Length -gt 0) {
+                [void]$sha.TransformBlock($relBytes, 0, $relBytes.Length, $null, 0)
+            }
+            [void]$sha.TransformBlock($zero, 0, 1, $null, 0)
+            $bytes = [IO.File]::ReadAllBytes($f.FullName)
+            if ($bytes.Length -gt 0) {
+                [void]$sha.TransformBlock($bytes, 0, $bytes.Length, $null, 0)
+            }
+            [void]$sha.TransformBlock($zero, 0, 1, $null, 0)
         }
+        [void]$sha.TransformFinalBlock((New-Object byte[] 0), 0, 0)
+        $hash = [BitConverter]::ToString($sha.Hash).Replace('-', '')
+        return "${hash}:$($files.Count)"
+    } finally {
+        $sha.Dispose()
     }
-    $count = @(Get-ChildItem -LiteralPath $Dir -Recurse -File -Force -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -ne '.skillbridge-copy' }).Count
-    return "${hash}:${count}"
 }
 
 function Read-ManagedSkills {
@@ -198,13 +277,15 @@ function Write-ManagedSkills {
 function Test-OurSkillEntry {
     param(
         $Item,
-        [string]$SourceRoot,
-        $ManagedSet
+        [string]$SourceRoot
     )
-    # A dest entry is "ours" if we recorded it, or if it is a link pointing
-    # into the CC Switch source (left over from an older junction/symlink run).
+    # Ownership is proven by a dest-side marker or a link into the source.
+    # .skillbridge-managed.json is only an index — a polluted or stale list
+    # must never authorize deleting a tool's own directory.
     if ($null -eq $Item) { return $false }
-    if ($ManagedSet -and $ManagedSet.Contains([string]$Item.Name)) { return $true }
+    if (-not (Test-ReparsePoint $Item) -and (Test-CopyMarker $Item.FullName)) {
+        return $true
+    }
     $t = $null
     if ($Item.LinkType) { $t = [string]$Item.Target }
     elseif (Test-ReparsePoint $Item) { $t = [string]$Item.Target }
@@ -221,22 +302,29 @@ function Test-OurSkillEntry {
 function Copy-SkillDirectory {
     param(
         [string]$Source,
-        [string]$Destination
+        [string]$Destination,
+        [switch]$WriteMarker
     )
     # Copy file-by-file. Copy-Item -Recurse of a directory can produce a
     # reparse point on some Windows hosts; Cloud Agents cannot follow those.
+    # Skip reparse points / the dest-only marker so we never re-copy a link.
     if (Test-Path -LiteralPath $Destination) {
         Remove-SkillEntry $Destination
     }
     [void][IO.Directory]::CreateDirectory($Destination)
+    $marker = Get-CopyMarkerName
     foreach ($item in @(Get-ChildItem -LiteralPath $Source -Force -ErrorAction Stop)) {
+        if ($item.Name -eq $marker) { continue }
+        if (Test-ReparsePoint $item) { continue }
         $target = Join-Path $Destination $item.Name
         if ($item.PSIsContainer) {
-            if (Test-ReparsePoint $item) { continue }
             Copy-SkillDirectory -Source $item.FullName -Destination $target
         } else {
             [IO.File]::Copy($item.FullName, $target, $true)
         }
+    }
+    if ($WriteMarker) {
+        Write-CopyMarker $Destination
     }
 }
 

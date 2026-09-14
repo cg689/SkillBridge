@@ -101,7 +101,7 @@ chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
 ```
 
 - `source` — the CC Switch skills library (`%USERPROFILE%\.cc-switch\skills` on Windows, `$HOME/.cc-switch/skills` on Unix).
-- `targets` — a `name → skills directory` map. A value can be a path string (link) or `{ "path": "...", "mode": "copy" }` for tools that cannot follow junctions (Cursor). `%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%` (Windows) and `$HOME` (Unix) are expanded automatically. Relative paths like `.cursor/skills` are resolved from the current directory.
+- `targets` — a `name → skills directory` map. A value can be a path string (link) or `{ "path": "...", "mode": "copy" }` for tools that cannot follow junctions (Cursor). A leftover `"Cursor": "path"` string, or any path ending in `/.cursor/skills`, is promoted to copy mode. `%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%` (Windows) and `$HOME` (Unix) are expanded automatically. Relative paths like `.cursor/skills` are resolved from the current directory. `detect-tools` keeps extra targets you added that are not in the catalog.
 - `link_type` — `junction` (Windows, no admin required) or `symlink` (Unix). Used only for `mode: link` targets.
 
 See [支持的软件列表.md](支持的软件列表.md) for the full list of supported tools and their default paths. The catalog file [`supported-tools.json`](supported-tools.json) is the source of truth used by both detect-tools scripts.
@@ -178,7 +178,7 @@ Commit `.cursor/skills/` (reliable for `cursor.com/agents`) or keep it gitignore
 Cursor additionally loads `~/.claude/skills`, `~/.codex/skills` and `~/.agents/skills` for compatibility, so if those tools are in `targets` too, the same skill may show up more than once locally — drop the extras you don't want.
 
 **Stale links left behind after deleting a CC Switch skill?**
-They are pruned automatically (reported as `pruned=` in the summary). The rule is "links only": an entry is removed when it is a link whose recorded target no longer exists. A real directory is never touched, so a tool's own skills stay safe.
+They are pruned automatically (reported as `pruned=` in the summary). Link-mode targets only remove a reparse point / symlink whose recorded target is gone. Copy-mode targets only remove a directory that has a `.skillbridge-copy` marker (or a leftover link into the CC Switch source). A tool's own skills stay safe even if they were listed in `.skillbridge-managed.json`.
 
 **The script reports `pruned=0` but the folder clearly has broken links?**
 Check that the folder is listed in `targets`. Also note that `Test-Path` does not resolve a junction's target — it returns `True` even for a dead one. The script compares the link's recorded `Target` path instead.

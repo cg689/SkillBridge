@@ -36,6 +36,10 @@ $cfg = @{
             path = (Join-Path $tmp 'tgt-copy')
             mode = 'copy'
         }
+        SelfCopy  = @{
+            path = (Join-Path $tmp 'src')
+            mode = 'copy'
+        }
         BadTool   = '%NOPE_UNSET_VAR%\skills'
     }
     # The DB check compares `source` against the real cc-switch.db. Off here, or
@@ -84,6 +88,22 @@ try {
     if ($managed -notmatch 'demo-skill') {
         throw "FAIL: managed list missing demo-skill: $managed"
     }
+    if (-not (Test-Path (Join-Path $tmp 'tgt-copy\demo-skill\.skillbridge-copy'))) {
+        throw 'FAIL: copy-mode dest is missing .skillbridge-copy marker'
+    }
+    if (Test-Path (Join-Path $tmp 'src\demo-skill\.skillbridge-copy')) {
+        throw 'FAIL: copy dest==source wrote a marker into the source skill'
+    }
+    if (-not (Test-Path (Join-Path $tmp 'src\demo-skill\SKILL.md'))) {
+        throw 'FAIL: copy dest==source removed the source skill'
+    }
+    New-Item -ItemType Directory -Path (Join-Path $tmp 'tgt-copy\own-skill') -Force | Out-Null
+    Set-Content -Path (Join-Path $tmp 'tgt-copy\own-skill\SKILL.md') -Value '# mine' -Encoding UTF8
+    $pollutedJson = '{ "skills": ["demo-skill", "own-skill"] }'
+    [System.IO.File]::WriteAllText(
+        (Join-Path $tmp 'tgt-copy\.skillbridge-managed.json'),
+        $pollutedJson,
+        (New-Object System.Text.UTF8Encoding($false)))
     $logText = Get-Content $log -Raw
     if ($logText -notmatch 'created  Smoke : demo-skill') {
         throw "FAIL: log did not record tool name 'Smoke': $logText"
@@ -100,6 +120,12 @@ try {
     if ($out2 -notmatch 'pruned=0') {
         throw "FAIL: second run expected pruned=0, got: $out2"
     }
+    if (-not (Test-Path (Join-Path $tmp 'tgt-copy\own-skill\SKILL.md'))) {
+        throw 'FAIL: polluted managed list deleted a tool-owned own-skill'
+    }
+    if (Test-Path (Join-Path $tmp 'tgt-copy\own-skill\.skillbridge-copy')) {
+        throw 'FAIL: polluted managed list treated own-skill as ours'
+    }
     Set-Content -Path (Join-Path $tmp 'src\demo-skill\SKILL.md') -Value '# demo-v2' -Encoding UTF8
     $copyBefore = Get-Content (Join-Path $tmp 'tgt-copy\demo-skill\SKILL.md') -Raw
     if ($copyBefore -match 'demo-v2') {
@@ -114,6 +140,20 @@ try {
         throw 'FAIL: copied SKILL.md was not refreshed'
     }
 
+    New-Item -ItemType Directory -Path (Join-Path $tmp 'src\demo-skill\scripts') -Force | Out-Null
+    Set-Content -Path (Join-Path $tmp 'src\demo-skill\scripts\run.sh') -Value 'echo hi' -Encoding UTF8
+    Set-Content -Path (Join-Path $tmp 'src\demo-skill\.hidden-note') -Value 'hidden' -Encoding UTF8
+    $outScripts = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
+    if ($outScripts -notmatch 'updated=1') {
+        throw "FAIL: copy target should refresh after scripts/ change, got: $outScripts"
+    }
+    if (-not (Test-Path (Join-Path $tmp 'tgt-copy\demo-skill\scripts\run.sh'))) {
+        throw 'FAIL: scripts/ was not copied'
+    }
+    if (-not (Test-Path (Join-Path $tmp 'tgt-copy\demo-skill\.hidden-note'))) {
+        throw 'FAIL: hidden file inside skill was not copied'
+    }
+
     $copyInto = Join-Path $tmp 'proj\.cursor\skills'
     $out4 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath -CopyInto $copyInto
     if (-not (Test-Path (Join-Path $copyInto 'demo-skill\SKILL.md'))) {
@@ -123,8 +163,32 @@ try {
     if ($copyIntoItem.LinkType) {
         throw 'FAIL: -CopyInto created a link instead of a real directory'
     }
+    if (-not (Test-Path (Join-Path $copyInto 'demo-skill\.skillbridge-copy'))) {
+        throw 'FAIL: -CopyInto dest is missing .skillbridge-copy marker'
+    }
 
-    Write-Host 'OK: windows smoke (junction+copy, idempotent, archive skipped, dead link pruned, -CopyInto)'
+    $legacy = Join-Path $tmp 'legacy-cursor'
+    New-Item -ItemType Directory -Path $legacy -Force | Out-Null
+    $legacyCfg = @{
+        link_type = 'junction'
+        source    = (Join-Path $tmp 'src')
+        targets   = @{
+            Cursor = $legacy
+        }
+        check_db  = $false
+    } | ConvertTo-Json -Depth 8
+    $legacyCfgPath = Join-Path $tmp 'cfg-legacy.json'
+    [System.IO.File]::WriteAllText($legacyCfgPath, $legacyCfg, (New-Object System.Text.UTF8Encoding($false)))
+    $legacyOut = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $legacyCfgPath
+    $legacyItem = Get-Item (Join-Path $legacy 'demo-skill') -Force
+    if ($legacyItem.LinkType -or ($legacyItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "FAIL: legacy Cursor string target must copy, not link (got: $legacyOut)"
+    }
+    if (-not (Test-Path (Join-Path $legacy 'demo-skill\.skillbridge-copy'))) {
+        throw 'FAIL: legacy Cursor copy is missing .skillbridge-copy marker'
+    }
+
+    Write-Host 'OK: windows smoke (junction+copy, marker ownership, scripts refresh, dest!=src, Cursor upgrade, -CopyInto)'
 
     # detect-tools: produces a valid config.json that includes Cursor
     & (Join-Path $root 'detect-tools.ps1') -All | Out-Null
@@ -137,6 +201,23 @@ try {
     }
     if ($gen.targets.Cursor.mode -ne 'copy') {
         throw "FAIL: detect-tools Cursor must be copy mode, got: $($gen.targets.Cursor)"
+    }
+    $genText = Get-Content $repoConfig -Raw
+    $injected = $false
+    $rewritten = foreach ($line in ($genText -split "`n")) {
+        if (-not $injected -and $line -match '"targets"\s*:') {
+            $line
+            '    "MyCustom": "/tmp/skillbridge-custom-skills",'
+            $injected = $true
+        } else {
+            $line
+        }
+    }
+    [System.IO.File]::WriteAllText($repoConfig, ($rewritten -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    & (Join-Path $root 'detect-tools.ps1') -All | Out-Null
+    $gen2 = Get-Content $repoConfig -Raw | ConvertFrom-Json
+    if ($gen2.targets.MyCustom -ne '/tmp/skillbridge-custom-skills') {
+        throw "FAIL: detect-tools dropped extra target MyCustom, got: $($gen2.targets | ConvertTo-Json -Compress)"
     }
     Write-Host 'OK: detect-tools'
 } finally {
