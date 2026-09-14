@@ -162,18 +162,22 @@ Yes. The user-level target is `~/.cursor/skills`, and it uses **copy mode** (rea
 
 Cloud Agents still run on a separate VM and cannot see your laptop. After SkillBridge copies skills into `~/.cursor/skills`:
 
-1. Turn on **Settings → Agents → Sync Skills for Cloud Agents**, then start the agent from the desktop Agents Window; or
-2. Materialize skills into the repo so the checkout has them:
+1. **Reliable (recommended for cursor.com / Grok Bot):** materialize skills into the **project repo** Cloud Agents check out, then commit and push:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-skills.ps1 -CopyInto .\.cursor\skills
+# Double-click 同步到仓库给云端用.bat and paste the project path, or:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-skills.ps1 -CopyInto D:\path\to\your-repo\.cursor\skills
 ```
 
 ```bash
-./sync-skills.sh --copy-into ./.cursor/skills
+./sync-skills.sh --copy-into /path/to/your-repo/.cursor/skills
 ```
 
-Commit `.cursor/skills/` (reliable for `cursor.com/agents`) or keep it gitignored and rely on an environment snapshot / `environment.json` install script. Agents started from the website or Grok Bot may not receive user-level synced skills even when the toggle is on.
+Then `git add .cursor/skills && git commit && git push`, and start a **new** Cloud Agent on that commit.
+
+2. **Optional / flaky:** turn on **Cursor Settings → Agents → Sync Skills for Cloud Agents**. Even when the toggle is on, agents started from the website or Grok Bot often still have an empty `~/.cursor/skills` on the VM. Prefer the desktop Agents Window if you rely on this path.
+
+Do **not** dump personal skills into the SkillBridge tool repo itself unless you are only testing — put them in the repo you actually work on.
 
 Cursor additionally loads `~/.claude/skills`, `~/.codex/skills` and `~/.agents/skills` for compatibility, so if those tools are in `targets` too, the same skill may show up more than once locally — drop the extras you don't want.
 

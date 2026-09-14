@@ -150,18 +150,22 @@ macOS / Linux 同理：`sync-skills.sh` 会自动把 `%USERPROFILE%` 映射到 `
 
 Cloud Agent 跑在独立虚拟机里，看不到你电脑上的 `~/.cc-switch`。SkillBridge 把 skill 拷进 `~/.cursor/skills` 之后还要任选其一：
 
-1. 打开 **Settings → Agents → Sync Skills for Cloud Agents**，并从桌面 Agents 窗口启动（从 cursor.com / Grok Bot 启动的云端任务目前经常拿不到用户级同步）；或
-2. 把 skill 落到仓库里，让云端 checkout 就能读到：
+1. **稳妥（cursor.com / Grok Bot 推荐）：** 把 skill 落到 **Cloud Agent 会 checkout 的那个项目仓库**，再提交并推送：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-skills.ps1 -CopyInto .\.cursor\skills
+# 双击「同步到仓库给云端用.bat」，粘贴项目路径；或：
+powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-skills.ps1 -CopyInto D:\path\to\your-repo\.cursor\skills
 ```
 
 ```bash
-./sync-skills.sh --copy-into ./.cursor/skills
+./sync-skills.sh --copy-into /path/to/your-repo/.cursor/skills
 ```
 
-把 `.cursor/skills/` 提交进 git 最稳；不想入库就加入 `.gitignore`，改用环境快照或 `environment.json` 的安装脚本拷到虚拟机的 `~/.cursor/skills`。
+然后 `git add .cursor/skills && git commit && git push`，再在该提交上开一个 **新的** Cloud Agent。
+
+2. **可选 / 经常失效：** 打开 **Cursor Settings → Agents → Sync Skills for Cloud Agents**。开关打开后，从网页或 Grok Bot 拉起的云端任务在虚拟机里仍然经常是空的 `~/.cursor/skills`。若坚持走这条路，请从桌面 Agents 窗口启动。
+
+不要把个人 skill 长期提交进 SkillBridge 工具仓库本身（除非只是验证）——放到你真正干活的那个项目仓库里。
 
 Cursor 为兼容还会读取 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills`；这些若也在 `targets` 里，本地可能看到重复——不需要的行删掉即可。
 

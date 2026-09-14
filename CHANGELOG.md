@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `同步到仓库给云端用.bat`: one-click `-CopyInto` into a project repo's
+  `.cursor/skills` (path argument, drag-and-drop, or prompt). Documents that
+  *Sync Skills for Cloud Agents* often leaves website / Grok Bot VMs with an
+  empty `~/.cursor/skills`, so committing project-level skills is the reliable path.
 - Cursor (`%USERPROFILE%\.cursor\skills`) as a first-class target. 23 targets
   in total. Cursor uses **copy mode** (real directories): Cloud Agents and
   Cursor's own skill discovery do not follow junctions/symlinks, so a live
