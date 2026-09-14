@@ -51,8 +51,31 @@ foreach ($c in $candidates) {
     }
 }
 
-# preserve source / autolink from an existing config if present
+# Keep extra targets the user added (names that are not in the catalog).
+# Re-running detect-tools must not wipe a custom tool.
 $existing = Read-ConfigFile $configPath
+$keptExtra = @()
+if ($existing -and $existing.targets) {
+    $catalogNames = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($c in $candidates) { [void]$catalogNames.Add($c.Name) }
+    foreach ($p in $existing.targets.PSObject.Properties) {
+        if ($catalogNames.Contains($p.Name)) { continue }
+        $val = $p.Value
+        if ($null -eq $val) { continue }
+        if ($val -is [string]) {
+            $targets[$p.Name] = [string]$val
+        } elseif ($null -ne $val.mode) {
+            $tPath = if ($null -ne $val.path) { [string]$val.path } else { [string]$val.skills }
+            $targets[$p.Name] = @{ path = $tPath; mode = [string]$val.mode }
+        } else {
+            $tPath = if ($null -ne $val.path) { [string]$val.path } else { [string]$val }
+            $targets[$p.Name] = [string]$tPath
+        }
+        $keptExtra += $p.Name
+    }
+}
+
+# preserve source / autolink from an existing config if present
 $autolink = Get-AutolinkDefaults $existing.autolink
 $cfgLinkType = if ($existing -and $existing.link_type) { $existing.link_type } else { 'junction' }
 $cfgSource = if ($existing -and $existing.source) {
@@ -127,4 +150,5 @@ $json = ConvertTo-SkillBridgeConfig @jsonParams
 Write-Host "Detected $($found.Count) / $($candidates.Count) supported tools."
 Write-Host "  installed : $($found -join ', ')"
 if ($missed.Count -gt 0) { Write-Host "  not found : $($missed -join ', ')" }
+if ($keptExtra.Count -gt 0) { Write-Host "  kept extra : $($keptExtra -join ', ')" }
 Write-Host "config.json written. Now run .\sync-skills.ps1 or double-click 同步CCSwitch技能.bat."

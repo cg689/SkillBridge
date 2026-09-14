@@ -56,6 +56,7 @@ cat > "$TMP/cfg.json" <<EOF
   "targets": {
     "Smoke": "$TGT",
     "SmokeCopy": { "path": "$TGT-copy", "mode": "copy" },
+    "SelfCopy": { "path": "$SRC", "mode": "copy" },
     "BadHome": "%HERMES_HOME%\\\\skills"
   },
   "check_db": false
@@ -83,6 +84,18 @@ if [ ! -f "$TGT-copy/.skillbridge-managed.json" ]; then
     echo "FAIL: copy-mode dest is missing .skillbridge-managed.json" >&2
     exit 1
 fi
+if [ ! -f "$TGT-copy/demo-skill/.skillbridge-copy" ]; then
+    echo "FAIL: copy-mode dest is missing .skillbridge-copy marker" >&2
+    exit 1
+fi
+if [ -f "$SRC/demo-skill/.skillbridge-copy" ]; then
+    echo "FAIL: copy dest==source wrote a marker into the source skill" >&2
+    exit 1
+fi
+if [ ! -f "$SRC/demo-skill/SKILL.md" ]; then
+    echo "FAIL: copy dest==source removed the source skill" >&2
+    exit 1
+fi
 if [ -e "$TGT/_archived" ] || [ -L "$TGT/_archived" ]; then
     echo "FAIL: underscore-prefixed archive was linked" >&2
     exit 1
@@ -104,6 +117,18 @@ if ! grep -q 'WARN target skipped' "$TMP/stderr.log"; then
     cat "$TMP/stderr.log" >&2
     exit 1
 fi
+mkdir -p "$TGT-copy/own-skill"
+echo "# mine" > "$TGT-copy/own-skill/SKILL.md"
+python3 - "$TGT-copy/.skillbridge-managed.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path, encoding="utf-8"))
+skills = list(data.get("skills") or [])
+if "own-skill" not in skills:
+    skills.append("own-skill")
+json.dump({"skills": skills}, open(path, "w", encoding="utf-8"))
+PY
+
 if ! grep -q 'created  Smoke : demo-skill' "$LOG"; then
     echo "FAIL: log did not record tool name 'Smoke' (got:)" >&2
     cat "$LOG" >&2
@@ -124,6 +149,14 @@ if ! printf '%s\n' "$out" | grep -q 'pruned=0'; then
     echo "FAIL: second run expected pruned=0, got: $out" >&2
     exit 1
 fi
+if [ ! -d "$TGT-copy/own-skill" ] || [ ! -f "$TGT-copy/own-skill/SKILL.md" ]; then
+    echo "FAIL: polluted managed list deleted a tool-owned own-skill" >&2
+    exit 1
+fi
+if [ -f "$TGT-copy/own-skill/.skillbridge-copy" ]; then
+    echo "FAIL: polluted managed list treated own-skill as ours" >&2
+    exit 1
+fi
 
 echo "# demo-v2" > "$SRC/demo-skill/SKILL.md"
 out="$(bash "$ROOT/sync-skills.sh" "$TMP/cfg.json" 2>/dev/null)"
@@ -133,6 +166,29 @@ if ! printf '%s\n' "$out" | grep -q 'updated=1'; then
 fi
 if ! grep -q 'demo-v2' "$TGT-copy/demo-skill/SKILL.md"; then
     echo "FAIL: copied SKILL.md was not refreshed" >&2
+    exit 1
+fi
+
+mkdir -p "$SRC/demo-skill/scripts"
+echo 'echo hi' > "$SRC/demo-skill/scripts/run.sh"
+echo hidden > "$SRC/demo-skill/.hidden-note"
+echo payload > "$TMP/outside.txt"
+ln -s "$TMP/outside.txt" "$SRC/demo-skill/outside-link"
+out="$(bash "$ROOT/sync-skills.sh" "$TMP/cfg.json" 2>/dev/null)"
+if ! printf '%s\n' "$out" | grep -q 'updated=1'; then
+    echo "FAIL: copy target should refresh after scripts/ change (got: $out)" >&2
+    exit 1
+fi
+if [ ! -f "$TGT-copy/demo-skill/scripts/run.sh" ]; then
+    echo "FAIL: scripts/ was not copied" >&2
+    exit 1
+fi
+if [ ! -f "$TGT-copy/demo-skill/.hidden-note" ]; then
+    echo "FAIL: hidden file inside skill was not copied" >&2
+    exit 1
+fi
+if [ -e "$TGT-copy/demo-skill/outside-link" ] || [ -L "$TGT-copy/demo-skill/outside-link" ]; then
+    echo "FAIL: copy mode must skip source symlinks" >&2
     exit 1
 fi
 
@@ -159,7 +215,43 @@ if [ -L "$TMP/proj/.cursor/skills/demo-skill" ] || [ ! -f "$TMP/proj/.cursor/ski
     exit 1
 fi
 
-echo "OK: unix smoke (link+copy, idempotent, archive skipped, dead/stale pruned, tool name logged, --copy-into)"
+if [ ! -f "$TMP/proj/.cursor/skills/demo-skill/.skillbridge-copy" ]; then
+    echo "FAIL: --copy-into dest is missing .skillbridge-copy marker" >&2
+    exit 1
+fi
+
+LEGACY="$TMP/legacy-cursor"
+mkdir -p "$LEGACY"
+cat > "$TMP/cfg-legacy.json" <<EOF
+{
+  "link_type": "symlink",
+  "source": "$SRC",
+  "targets": {
+    "Cursor": "$LEGACY"
+  },
+  "check_db": false
+}
+EOF
+if ! bash "$ROOT/sync-skills.sh" "$TMP/cfg-legacy.json" >/dev/null 2>"$TMP/legacy.err"; then
+    echo "FAIL: legacy Cursor string target exited non-zero" >&2
+    cat "$TMP/legacy.err" >&2
+    exit 1
+fi
+if [ -L "$LEGACY/demo-skill" ] || [ ! -f "$LEGACY/demo-skill/SKILL.md" ]; then
+    echo "FAIL: legacy Cursor string target must copy, not symlink" >&2
+    exit 1
+fi
+if [ ! -f "$LEGACY/demo-skill/.skillbridge-copy" ]; then
+    echo "FAIL: legacy Cursor copy is missing .skillbridge-copy marker" >&2
+    exit 1
+fi
+if ! grep -q 'using copy mode' "$TMP/legacy.err"; then
+    echo "FAIL: expected NOTE that Cursor string target was promoted to copy" >&2
+    cat "$TMP/legacy.err" >&2
+    exit 1
+fi
+
+echo "OK: unix smoke (link+copy, marker ownership, scripts refresh, dest!=src, Cursor upgrade, --copy-into)"
 
 # detect-tools.sh --all writes a config that includes every catalogued tool
 if ! bash "$ROOT/detect-tools.sh" --all >/dev/null; then
@@ -177,7 +269,23 @@ if cfg.get("link_type") != "symlink":
     sys.exit("FAIL: detect-tools.sh should default link_type=symlink, got %r" % cfg.get("link_type"))
 if len(targets) < 1:
     sys.exit("FAIL: detect-tools.sh produced no targets")
+targets["MyCustom"] = "/tmp/skillbridge-custom-skills"
+json.dump(cfg, open(sys.argv[1], "w", encoding="utf-8"), indent=2)
 print("OK: detect-tools.sh (%d targets)" % len(targets))
+PY
+then
+    exit 1
+fi
+if ! bash "$ROOT/detect-tools.sh" --all >/dev/null; then
+    echo "FAIL: detect-tools.sh --all (second run) exited non-zero" >&2
+    exit 1
+fi
+if ! python3 - "$REPO_CONFIG" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+if cfg.get("targets", {}).get("MyCustom") != "/tmp/skillbridge-custom-skills":
+    sys.exit("FAIL: detect-tools.sh dropped extra target MyCustom, got %r" % cfg.get("targets"))
+print("OK: detect-tools.sh kept extra target")
 PY
 then
     exit 1

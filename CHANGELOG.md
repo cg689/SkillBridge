@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-target `"mode": "copy"` (`{ "path": "...", "mode": "copy" }`) plus
   `sync-skills.ps1 -CopyInto` / `sync-skills.sh --copy-into` to materialize
   skills into a repo's `.cursor/skills` for Cloud Agent checkouts.
+- Per-skill `.skillbridge-copy` marker so copy-mode ownership does not depend
+  on `.skillbridge-managed.json` (that file is only an index).
 - Managed-copy bookkeeping (`.skillbridge-managed.json`) so refreshes and
   deletes never touch a tool's own skills.
 - `detect-tools.sh`: Unix counterpart of `detect-tools.ps1`.
@@ -24,11 +26,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool names in the Unix log, and `check-db-sync.py` (temp SQLite DB).
 
 ### Changed
+- Copy refresh fingerprints every regular file except the marker (sorted by
+  relative path), so a `scripts/`-only edit is picked up.
+- Unix copy mode copies file-by-file and skips symlinks, matching Windows.
+- Link-mode dead-link pruning on Windows uses the reparse-point attribute when
+  `LinkType` is empty.
+- `detect-tools` keeps extra targets that are not in `supported-tools.json`.
 - `config.example.json` now lists every supported target, not a subset.
 - `支持的软件列表.md` uses portable env-var paths instead of a machine-specific
   `C:\Users\Administrator\...` inventory.
 
 ### Fixed
+- A leftover `"Cursor": "path"` string in an existing `config.json` is promoted
+  to copy mode (same if the path ends with `/.cursor/skills`).
+- Copying a target whose dest equals the source is refused, so `rm` + copy
+  cannot delete the CC Switch library.
+- Unix `write_managed` reads skill names from stdin instead of argv (`ARG_MAX`).
 - Windows copy-mode bookkeeping: `Write-ManagedSkills` took `IEnumerable`,
   so PowerShell split a HashSet into individual characters and later
   refreshes treated our copies as foreign (skipped, never updated).

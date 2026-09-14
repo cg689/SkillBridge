@@ -76,7 +76,15 @@ def norm(v):
     return v
 
 
-def spec(value):
+def is_cursor_copy(name, path):
+    if (name or "").lower() == "cursor":
+        return True
+    norm_path = (path or "").replace("\\", "/").rstrip("/")
+    return norm_path.lower().endswith("/.cursor/skills") or norm_path.lower() == ".cursor/skills"
+
+
+def spec(name, value):
+    promoted = False
     if isinstance(value, dict):
         path = value.get("path") or value.get("skills") or ""
         mode = (value.get("mode") or "link").lower()
@@ -84,13 +92,23 @@ def spec(value):
             mode = "link"
         if mode != "copy":
             mode = "link"
-        return mode, path
-    return "link", value
+    else:
+        mode, path = "link", value
+    if mode != "copy" and is_cursor_copy(name, path):
+        mode = "copy"
+        promoted = True
+    return mode, path, promoted
 
 print(norm(cfg["source"]))
 for name, v in cfg.get("targets", {}).items():
     try:
-        mode, path = spec(v)
+        mode, path, promoted = spec(name, v)
+        if promoted:
+            print(
+                "NOTE: target %s is Cursor / .cursor/skills — using copy mode"
+                % name,
+                file=sys.stderr,
+            )
         print("%s\t%s\t%s" % (name.replace("\t", " "), mode, norm(path)))
     except ValueError as e:
         print("WARN target skipped: %s" % e, file=sys.stderr)
@@ -168,42 +186,52 @@ if [ "$skill_count" -eq 0 ]; then
     exit 1
 fi
 
-skill_fingerprint() {
-    local dir="$1"
-    local md="$dir/SKILL.md"
-    local hash=""
-    if [ -f "$md" ]; then
-        if command -v sha256sum >/dev/null 2>&1; then
-            hash="$(sha256sum "$md" | awk '{print $1}')"
-        else
-            hash="$(shasum -a 256 "$md" | awk '{print $1}')"
-        fi
-    fi
-    local count
-    count="$(find "$dir" -type f ! -name '.skillbridge-copy' 2>/dev/null | wc -l | tr -d ' ')"
-    printf '%s:%s' "$hash" "$count"
-}
+COPY_MARKER=".skillbridge-copy"
 
-read_managed() {
-    python3 -c 'import json,sys
-try:
-    print("\n".join(json.load(open(sys.argv[1])).get("skills") or []))
-except Exception:
-    pass
-' "$1" 2>/dev/null || true
+skill_fingerprint() {
+    # Hash every regular file except the dest-only copy marker, in relative-path
+    # order. Including the marker would make dest never equal source.
+    python3 - "$1" "$COPY_MARKER" <<'PY'
+import hashlib, os, sys
+root, marker = sys.argv[1], sys.argv[2]
+h = hashlib.sha256()
+files = []
+for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+    for name in filenames:
+        if name == marker:
+            continue
+        path = os.path.join(dirpath, name)
+        if os.path.islink(path) or not os.path.isfile(path):
+            continue
+        rel = os.path.relpath(path, root).replace("\\", "/")
+        files.append(rel)
+files.sort()
+for rel in files:
+    path = os.path.join(root, rel)
+    h.update(rel.encode("utf-8"))
+    h.update(b"\0")
+    with open(path, "rb") as handle:
+        h.update(handle.read())
+    h.update(b"\0")
+sys.stdout.write("%s:%d" % (h.hexdigest(), len(files)))
+PY
 }
 
 write_managed() {
-    # Names are argv, not stdin: `python3 - <<'PY'` would steal a stdin pipe.
+    # Names on stdin (one per line) so a large skill set cannot hit ARG_MAX.
     local file="$1"
-    shift
-    MANAGED_FILE="$file" python3 - "$@" <<'PY'
-import json, os, sys
-path = os.environ["MANAGED_FILE"]
+    python3 -c '
+import json, sys
+path = sys.argv[1]
+names = [line.rstrip("\n") for line in sys.stdin if line.rstrip("\n")]
 with open(path, "w", encoding="utf-8") as handle:
-    json.dump({"skills": list(sys.argv[1:])}, handle)
+    json.dump({"skills": names}, handle)
     handle.write("\n")
-PY
+' "$file"
+}
+
+same_path() {
+    python3 -c 'import os,sys; print("1" if os.path.realpath(sys.argv[1])==os.path.realpath(sys.argv[2]) else "0")' "$1" "$2"
 }
 
 is_our_link() {
@@ -221,6 +249,47 @@ is_our_link() {
         "$srcn"|"$srcn"/*) return 0 ;;
     esac
     return 1
+}
+
+is_our_entry() {
+    local dest="$1"
+    if [ -d "$dest" ] && [ ! -L "$dest" ] && [ -f "$dest/$COPY_MARKER" ]; then
+        return 0
+    fi
+    is_our_link "$dest"
+}
+
+rm_skill_entry() {
+    local dest="$1"
+    if [ -L "$dest" ]; then
+        rm -f "$dest"
+    elif [ -d "$dest" ]; then
+        rm -rf "$dest"
+    elif [ -e "$dest" ]; then
+        rm -f "$dest"
+    fi
+}
+
+copy_skill_tree() {
+    local src="$1" dest="$2"
+    mkdir -p "$dest"
+    local item name dest_item
+    while IFS= read -r -d '' item; do
+        name="$(basename "$item")"
+        [ "$name" = "$COPY_MARKER" ] && continue
+        dest_item="$dest/$name"
+        if [ -L "$item" ]; then
+            continue
+        elif [ -d "$item" ]; then
+            copy_skill_tree "$item" "$dest_item"
+        elif [ -f "$item" ]; then
+            cp -f "$item" "$dest_item"
+        fi
+    done < <(find "$src" -mindepth 1 -maxdepth 1 -print0)
+}
+
+write_copy_marker() {
+    printf 'skillbridge-copy\n' > "$1/$COPY_MARKER"
 }
 
 name_in_list() {
@@ -241,30 +310,26 @@ if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
         i=$((i+1))
         [ -z "$tdir" ] && continue
         tdir="$(resolve_target_path "$tdir")"
+        if [ "$mode" = "copy" ] && [ "$(same_path "$tdir" "$SRC")" = "1" ]; then
+            echo "WARN: skip $tool : copy dest equals source ($tdir)" >&2
+            echo "SKIP     $tool : copy dest equals source" >> "$LOG"
+            continue
+        fi
         mkdir -p "$tdir"
         managed_file="$tdir/.skillbridge-managed.json"
-        managed=()
-        while IFS= read -r line; do
-            [ -n "$line" ] && managed+=("$line")
-        done < <(read_managed "$managed_file")
         new_managed=()
 
         if [ "$mode" = "copy" ]; then
-            for dest in "$tdir"/*; do
-                [ -e "$dest" ] || [ -L "$dest" ] || continue
+            while IFS= read -r -d '' dest; do
                 dname="$(basename "$dest")"
-                ours=0
-                if name_in_list "$dname" "${managed[@]+"${managed[@]}"}"; then
-                    ours=1
-                elif is_our_link "$dest"; then
-                    ours=1
-                fi
-                if [ "$ours" -eq 1 ] && ! name_in_list "$dname" "${SKILL_NAMES[@]}"; then
-                    rm -rf "$dest"
+                [ "$dname" = ".skillbridge-managed.json" ] && continue
+                [ "$dname" = "$COPY_MARKER" ] && continue
+                if is_our_entry "$dest" && ! name_in_list "$dname" "${SKILL_NAMES[@]}"; then
+                    rm_skill_entry "$dest"
                     pruned=$((pruned+1))
                     echo "pruned   $tool : $dname" >> "$LOG"
                 fi
-            done
+            done < <(find "$tdir" -mindepth 1 -maxdepth 1 -print0)
         fi
 
         for name in "${SKILL_NAMES[@]}"; do
@@ -273,7 +338,7 @@ if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
             if [ "$mode" = "copy" ]; then
                 ours=0
                 if [ -e "$dest" ] || [ -L "$dest" ]; then
-                    if name_in_list "$name" "${managed[@]+"${managed[@]}"}" || is_our_link "$dest"; then
+                    if is_our_entry "$dest"; then
                         ours=1
                     else
                         skipped=$((skipped+1))
@@ -290,7 +355,7 @@ if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
                 else
                     existed=0
                 fi
-                if err="$(rm -rf "$dest" && cp -a "$skill" "$dest" 2>&1)"; then
+                if err="$( { rm_skill_entry "$dest" && copy_skill_tree "$skill" "$dest" && write_copy_marker "$dest"; } 2>&1 )"; then
                     if [ "$existed" -eq 1 ]; then
                         updated=$((updated+1))
                         echo "updated  $tool : $name" >> "$LOG"
@@ -322,7 +387,7 @@ if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
         done
 
         if [ "$mode" = "copy" ]; then
-            write_managed "$managed_file" "${new_managed[@]+"${new_managed[@]}"}"
+            printf '%s\n' "${new_managed[@]+"${new_managed[@]}"}" | write_managed "$managed_file"
         fi
     done
 fi
@@ -338,8 +403,7 @@ if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
         [ -z "$tdir" ] && continue
         tdir="$(resolve_target_path "$tdir")"
         [ -d "$tdir" ] || continue
-        for link in "$tdir"/*; do
-            [ -e "$link" ] || [ -L "$link" ] || continue
+        while IFS= read -r -d '' link; do
             if [ -L "$link" ]; then
                 target="$(readlink "$link")"
                 case "$target" in
@@ -352,7 +416,7 @@ if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
                     echo "pruned   $tool : $(basename "$link")" >> "$LOG"
                 fi
             fi
-        done
+        done < <(find "$tdir" -mindepth 1 -maxdepth 1 -print0)
     done
 fi
 

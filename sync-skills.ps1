@@ -60,7 +60,11 @@ if ($linkType -eq 'SymbolicLink') {
 $targetList = @()
 if ($config.targets) {
     foreach ($entry in $config.targets.PSObject.Properties) {
-        $spec = Get-TargetSpec $entry.Value
+        $spec = Get-TargetSpec $entry.Value -Name $entry.Name
+        if ($spec.Promoted) {
+            Write-Host ("NOTE: target '$($entry.Name)' is Cursor / .cursor/skills — " +
+                "using copy mode (a string path would be a dead junction for Cloud Agents).") -ForegroundColor Yellow
+        }
         $targetList += [pscustomobject]@{ Name = $entry.Name; Path = $spec.Path; Mode = $spec.Mode }
     }
 }
@@ -84,16 +88,22 @@ foreach ($t in $targetList) {
     if (-not (Assert-ExpandablePath $tdir "target '$tool'")) {
         continue
     }
+    if ($t.Mode -eq 'copy' -and (Test-SameResolvedPath $tdir $src)) {
+        Write-Warning "SKIP target '$tool' : copy dest equals source ($tdir)"
+        $lines += "SKIP     $tool : copy dest equals source"
+        continue
+    }
     if (-not (Test-Path $tdir)) {
         New-Item -ItemType Directory -Path $tdir -Force | Out-Null
     }
     $managed = Read-ManagedSkills $tdir
+    $markerName = Get-CopyMarkerName
 
     if ($t.Mode -eq 'copy') {
         # Drop copies / leftover junctions we own whose source skill is gone.
         foreach ($item in @(Get-ChildItem -Path $tdir -Force -ErrorAction SilentlyContinue)) {
-            if ($item.Name -eq '.skillbridge-managed.json') { continue }
-            if (-not (Test-OurSkillEntry $item $src $managed)) { continue }
+            if ($item.Name -eq '.skillbridge-managed.json' -or $item.Name -eq $markerName) { continue }
+            if (-not (Test-OurSkillEntry $item $src)) { continue }
             if ($skillNames.Contains($item.Name)) { continue }
             Remove-SkillEntry $item.FullName
             [void]$managed.Remove($item.Name)
@@ -108,7 +118,7 @@ foreach ($t in $targetList) {
         $dest = Join-Path $tdir $s.Name
         $existing = Get-Item -Path $dest -Force -ErrorAction SilentlyContinue
         if ($t.Mode -eq 'copy') {
-            $ours = Test-OurSkillEntry $existing $src $managed
+            $ours = Test-OurSkillEntry $existing $src
             if ($null -ne $existing -and -not $ours) {
                 $skipped++
                 continue
@@ -121,7 +131,7 @@ foreach ($t in $targetList) {
                 }
             }
             try {
-                Copy-SkillDirectory -Source $s.FullName -Destination $dest
+                Copy-SkillDirectory -Source $s.FullName -Destination $dest -WriteMarker
                 if ($null -ne $existing) {
                     $updated++
                     $lines += "updated  $tool : $($s.Name)"
@@ -175,7 +185,8 @@ foreach ($t in $targetList) {
     if (-not (Test-Path $tdir)) { continue }
     foreach ($item in @(Get-ChildItem -Path $tdir -Force -ErrorAction SilentlyContinue)) {
         # Only links are ours to remove; a real folder belongs to the tool.
-        if (-not $item.LinkType) { continue }
+        # pwsh sometimes leaves LinkType empty on junctions — Attributes is reliable.
+        if (-not (Test-ReparsePoint $item)) { continue }
         # Test-Path on the link itself does NOT resolve its target for junctions,
         # so check the recorded target path instead. An unreadable target is left
         # alone: keeping a dead link beats deleting a live one.
