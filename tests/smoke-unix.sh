@@ -110,6 +110,15 @@ if [ -L "$TGT/dead-skill" ] || [ -e "$TGT/dead-skill" ]; then
 fi
 if [ ! -L "$TGT/rel-link" ] || [ ! -e "$TGT/rel-link" ]; then
     echo "FAIL: live relative-target symlink was pruned" >&2
+    echo "--- diagnostics ---" >&2
+    ls -la "$TGT" >&2
+    echo "readlink: [$(readlink "$TGT/rel-link" 2>&1)]" >&2
+    _abs="$(cd "$(dirname "$TGT/rel-link")" && pwd)/$(readlink "$TGT/rel-link" 2>/dev/null || echo GONE)"
+    echo "computed abs: [$_abs]" >&2
+    [ -e "$_abs" ] && echo "abs: EXISTS" >&2 || echo "abs: MISSING" >&2
+    echo "TMP=$TMP TGT=$TGT" >&2
+    echo "--- sync log ---" >&2
+    cat "$LOG" >&2
     exit 1
 fi
 if [ ! -d "$TGT/own-skill" ]; then
