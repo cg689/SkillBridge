@@ -46,8 +46,9 @@ echo "# demo" > "$SRC/demo-skill/SKILL.md"
 echo "# archive" > "$SRC/_archived/SKILL.md"
 ln -s /nonexistent/skillbridge-dead "$TGT/dead-skill"
 # A live symlink with a RELATIVE target must survive pruning: it resolves
-# against the link's own directory, not the process CWD.
-mkdir -p "$TGT/rel-real"
+# against the link's own directory, not the process CWD. rel-link sits in
+# $TGT, so its ../rel-real target must exist one level UP, in $TMP.
+mkdir -p "$TMP/rel-real"
 ln -s "../rel-real" "$TGT/rel-link"
 
 # NOTE: unquoted heredoc collapses `\\` to `\`, so we write 4 backslashes to
@@ -110,15 +111,6 @@ if [ -L "$TGT/dead-skill" ] || [ -e "$TGT/dead-skill" ]; then
 fi
 if [ ! -L "$TGT/rel-link" ] || [ ! -e "$TGT/rel-link" ]; then
     echo "FAIL: live relative-target symlink was pruned" >&2
-    echo "--- diagnostics ---" >&2
-    ls -la "$TGT" >&2
-    echo "readlink: [$(readlink "$TGT/rel-link" 2>&1)]" >&2
-    _abs="$(cd "$(dirname "$TGT/rel-link")" && pwd)/$(readlink "$TGT/rel-link" 2>/dev/null || echo GONE)"
-    echo "computed abs: [$_abs]" >&2
-    [ -e "$_abs" ] && echo "abs: EXISTS" >&2 || echo "abs: MISSING" >&2
-    echo "TMP=$TMP TGT=$TGT" >&2
-    echo "--- sync log ---" >&2
-    cat "$LOG" >&2
     exit 1
 fi
 if [ ! -d "$TGT/own-skill" ]; then
