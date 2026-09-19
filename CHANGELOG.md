@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `config.example.json`, with a CI check that the lists cannot drift.
 - Smoke coverage for dead-link pruning, underscore-prefixed archive folders,
   tool names in the Unix log, and `check-db-sync.py` (temp SQLite DB).
+- CI: the Windows smoke suite also runs under Windows PowerShell 5.1 (the shell
+  the .bat launchers and the scheduled task actually use), not just pwsh 7.
 
 ### Changed
 - Copy refresh fingerprints every regular file except the marker (sorted by
@@ -41,6 +43,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `C:\Users\Administrator\...` inventory.
 
 ### Fixed
+- Windows dead-link pruning resolved a symlink's *relative* target against the
+  process CWD instead of the link's own directory, so a live foreign symlink
+  could be declared dead and removed. `sync-skills.ps1` now resolves it the way
+  `sync-skills.sh` already did.
+- Link ownership accepted any string prefix of the source path, so a junction
+  into a sibling folder (`...\cc-switch\skills-backup\...`) was treated as ours
+  and overwritten. The check now requires the path separator (Windows only —
+  the Unix check was already strict).
+- `check-db-sync.py --fix` crashed with a traceback (after the backup, before
+  the repair) when the DB schema had no `directory` column, and could never
+  delete a row whose `directory` was NULL; a failed repair now exits 2 with the
+  transaction rolled back.
+- All PowerShell scripts are saved as UTF-8 **with BOM**, fixing mojibake in
+  `detect-tools.ps1`'s Chinese output under Windows PowerShell 5.1.
 - A leftover `"Cursor": "path"` string in an existing `config.json` is promoted
   to copy mode (same if the path ends with `/.cursor/skills`).
 - Copying a target whose dest equals the source is refused, so `rm` + copy

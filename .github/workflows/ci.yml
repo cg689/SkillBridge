@@ -56,6 +56,34 @@ jobs:
           if ($null -ne $t) { throw "dry-run must not register the task" }
           Write-Host "OK: autolink dry-run (no task registered)"
 
+  powershell51:
+    name: Smoke test (Windows PowerShell 5.1)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse-check all .ps1 files (5.1)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $errs = $null
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs)
+            if ($errs.Count) { Write-Error "$($_.Name): $($errs -join '; ')" }
+          }
+          Write-Host "All PowerShell files parse OK"
+      - name: Functional smoke test (5.1 — the shell the .bat files and the scheduled task use)
+        shell: powershell
+        run: |
+          .\tests\smoke-windows.ps1
+      - name: AutoLink dry-run (no real registration)
+        shell: powershell
+        run: |
+          $out = .\install-autolink.ps1 -DryRun
+          if ($out -notmatch 'DRY-RUN') { throw "expected DRY-RUN output, got: $out" }
+          $t = Get-ScheduledTask -TaskName 'CCSwitch Skills AutoLink' -ErrorAction SilentlyContinue
+          if ($null -ne $t) { throw "dry-run must not register the task" }
+          Write-Host "OK: autolink dry-run (no task registered)"
+
   shell:
     name: Lint + smoke test (Unix)
     runs-on: ubuntu-latest

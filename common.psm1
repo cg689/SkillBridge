@@ -1,4 +1,4 @@
-# common.psm1 — shared helpers for the SkillBridge PowerShell scripts.
+﻿# common.psm1 — shared helpers for the SkillBridge PowerShell scripts.
 #
 # Imported (dot-sourced) from sync-skills.ps1, detect-tools.ps1 and
 # install-autolink.ps1 so that env-var path expansion, config loading and log
@@ -292,7 +292,13 @@ function Test-OurSkillEntry {
     if ($t) {
         $normSrc = $SourceRoot.TrimEnd('\', '/')
         $normT = $t.TrimEnd('\', '/')
-        if ($normT.StartsWith($normSrc, [StringComparison]::OrdinalIgnoreCase)) {
+        # The separator matters: without it a link into a sibling folder
+        # ('...\skills-backup\demo') string-matches the source prefix
+        # ('...\skills') and a foreign link gets treated as ours. Mirrors the
+        # "$srcn"|"$srcn"/* case in sync-skills.sh.
+        if ($normT.Equals($normSrc, [StringComparison]::OrdinalIgnoreCase) -or
+            $normT.StartsWith("$normSrc\", [StringComparison]::OrdinalIgnoreCase) -or
+            $normT.StartsWith("$normSrc/", [StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
     }

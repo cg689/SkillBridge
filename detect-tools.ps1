@@ -1,4 +1,4 @@
-# detect-tools.ps1 — auto-generate config.json for the CURRENT machine.
+﻿# detect-tools.ps1 — auto-generate config.json for the CURRENT machine.
 #
 # Detects which supported tools are installed (by checking each tool's marker
 # directory from supported-tools.json) and writes a config.json that only

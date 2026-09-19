@@ -18,7 +18,7 @@ Usage:
 Exit codes:
     0  in sync, or drift repaired
     1  drift found but not repaired (no --fix)
-    2  could not run (missing paths, unreadable database)
+    2  could not run (missing paths, unreadable database) or --fix failed
 """
 import argparse
 import hashlib
@@ -228,11 +228,24 @@ def main():
             )
 
         for name in db_only:
-            conn.execute("DELETE FROM skills WHERE directory = ?", (name,))
+            # A row whose directory is NULL is keyed by name in scan_db, so it
+            # must also be matched by name; `WHERE directory = ?` alone would
+            # silently miss it and the drift would survive the fix.
+            conn.execute(
+                "DELETE FROM skills WHERE directory = ? "
+                "OR (directory IS NULL AND name = ?)",
+                (name, name),
+            )
 
         conn.commit()
         total = conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0]
         integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+    except sqlite3.Error as exc:
+        # Nothing was committed, so the database still holds the pre-fix state
+        # the backup above captured.
+        print(f"\n[error] could not repair {args.db}: {exc}")
+        print("        the repair was rolled back; the backup above is intact")
+        return 2
     finally:
         conn.close()
 

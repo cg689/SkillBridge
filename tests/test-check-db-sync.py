@@ -122,6 +122,41 @@ class CheckDbSyncTests(unittest.TestCase):
         self.assertEqual(names, ["keep-me"])
         self.assertIn("gone", result.stdout)
 
+    def test_fix_reports_error_when_schema_lacks_directory(self):
+        db = os.path.join(self.tmp.name, "legacy.db")
+        conn = sqlite3.connect(db)
+        conn.executescript(
+            "CREATE TABLE skills ("
+            "  id TEXT PRIMARY KEY, name TEXT, enabled_codex INTEGER);"
+            "INSERT INTO skills (id, name, enabled_codex) VALUES ('gone', 'gone', 1);"
+        )
+        conn.commit()
+        conn.close()
+        write_skill(self.source, "keep-me")
+        result = run_check(self.source, db, extra=["--fix"])
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("could not repair", result.stdout)
+        conn = sqlite3.connect(db)
+        count = conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0]
+        conn.close()
+        self.assertEqual(count, 1)  # repair rolled back: only the original row
+
+    def test_fix_removes_rows_keyed_by_name_when_directory_is_null(self):
+        conn = sqlite3.connect(self.db)
+        conn.execute(
+            "INSERT INTO skills (id, name, directory, enabled_codex) "
+            "VALUES ('ghost', 'ghost', NULL, 1)"
+        )
+        conn.commit()
+        conn.close()
+        write_skill(self.source, "keep-me")
+        result = run_check(self.source, self.db, extra=["--fix"])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        conn = sqlite3.connect(self.db)
+        directories = [r[0] for r in conn.execute("SELECT directory FROM skills")]
+        conn.close()
+        self.assertEqual(directories, ["keep-me"])
+
     def test_missing_db_exits_2(self):
         result = run_check(self.source, os.path.join(self.tmp.name, "nope.db"))
         self.assertEqual(result.returncode, 2)

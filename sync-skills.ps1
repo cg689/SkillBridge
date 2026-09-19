@@ -1,4 +1,4 @@
-# sync-skills.ps1 — Mirror CC Switch skills into agent tools via directory junctions.
+﻿# sync-skills.ps1 — Mirror CC Switch skills into agent tools via directory junctions.
 #
 # For every skill in the CC Switch skills dir that is missing in a target tool's
 # skills dir, create a directory junction (a "live link") pointing at the source.
@@ -191,7 +191,15 @@ foreach ($t in $targetList) {
         # so check the recorded target path instead. An unreadable target is left
         # alone: keeping a dead link beats deleting a live one.
         $target = [string]$item.Target
-        if (-not $target -or (Test-Path -LiteralPath $target)) { continue }
+        if (-not $target) { continue }
+        # A relative target resolves against the link's own directory, not the
+        # process CWD — same rule as sync-skills.sh. Testing the raw string
+        # would declare a live relative symlink dead whenever CWD differs.
+        if (-not [IO.Path]::IsPathRooted($target)) {
+            $target = [IO.Path]::GetFullPath(
+                (Join-Path (Split-Path -Parent $item.FullName) $target))
+        }
+        if (Test-Path -LiteralPath $target) { continue }
         # Remove-Item goes through the shell's safe-delete wrapper, which fails
         # closed on a link whose target is already gone (it cannot resolve the
         # path in order to trash it). The raw API unlinks the entry without

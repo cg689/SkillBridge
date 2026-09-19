@@ -1,4 +1,4 @@
-# tests/smoke-windows.ps1 — functional smoke test for the Windows (junction) sync path.
+﻿# tests/smoke-windows.ps1 — functional smoke test for the Windows (junction) sync path.
 #
 # Creates a temp source with one fake skill and a temp target, runs sync-skills.ps1
 # twice, and asserts: junction created, idempotent on second run, underscore
@@ -11,9 +11,12 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 
 $log = Join-Path $root 'sync-skills.log'
-$logBackup = if (Test-Path $log) { Get-Content $log -Raw } else { $null }
+# Byte-level backups: Get-Content decodes as ANSI under 5.1, and writing the
+# decoded text back would bake mojibake into files that hold UTF-8 (the log
+# gets Chinese lines from check-db-sync.py).
+$logBackup = if (Test-Path $log) { [IO.File]::ReadAllBytes($log) } else { $null }
 $repoConfig = Join-Path $root 'config.json'
-$cfgBackup = if (Test-Path $repoConfig) { Get-Content $repoConfig -Raw } else { $null }
+$cfgBackup = if (Test-Path $repoConfig) { [IO.File]::ReadAllBytes($repoConfig) } else { $null }
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('sb-smoke-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path (Join-Path $tmp 'src\demo-skill') -Force | Out-Null
@@ -26,6 +29,15 @@ $deadTarget = Join-Path $tmp 'will-vanish'
 New-Item -ItemType Directory -Path $deadTarget -Force | Out-Null
 New-Item -ItemType Junction -Path (Join-Path $tmp 'tgt\dead-skill') -Target $deadTarget | Out-Null
 Remove-Item -LiteralPath $deadTarget -Recurse -Force
+
+# A live symlink with a RELATIVE target must survive pruning: it resolves
+# against the link's own directory, not the process CWD. mklink stores the
+# target exactly as given; skipped when the host lacks symlink privilege.
+$relDir = Join-Path $tmp 'rel-target'
+New-Item -ItemType Directory -Path $relDir -Force | Out-Null
+$relLink = Join-Path $tmp 'tgt\rel-link'
+cmd /c mklink /D "$relLink" "..\rel-target" | Out-Null
+$relMade = ($LASTEXITCODE -eq 0)
 
 $cfg = @{
     link_type = 'junction'
@@ -73,6 +85,12 @@ try {
     }
     if (Test-Path (Join-Path $tmp 'tgt\dead-skill')) {
         throw 'FAIL: dead junction was not pruned'
+    }
+    if ($relMade) {
+        $rel = Get-Item (Join-Path $tmp 'tgt\rel-link') -Force
+        if (-not ($rel.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'FAIL: live relative-target symlink was pruned'
+        }
     }
     if (-not (Test-Path (Join-Path $tmp 'tgt\own-skill'))) {
         throw "FAIL: tool's own real directory was removed"
@@ -188,7 +206,31 @@ try {
         throw 'FAIL: legacy Cursor copy is missing .skillbridge-copy marker'
     }
 
-    Write-Host 'OK: windows smoke (junction+copy, marker ownership, scripts refresh, dest!=src, Cursor upgrade, -CopyInto)'
+    # Ownership needs the path SEPARATOR: a junction into a sibling of the
+    # source (src-backup) shares the source's string prefix but is not ours.
+    $backupSkill = Join-Path $tmp 'src-backup\demo-skill'
+    New-Item -ItemType Directory -Path $backupSkill -Force | Out-Null
+    Set-Content -Path (Join-Path $backupSkill 'SKILL.md') -Value '# backup' -Encoding UTF8
+    $ownTgt = Join-Path $tmp 'own-tgt'
+    New-Item -ItemType Directory -Path $ownTgt -Force | Out-Null
+    New-Item -ItemType Junction -Path (Join-Path $ownTgt 'demo-skill') -Target $backupSkill | Out-Null
+    $ownCfg = @{
+        link_type = 'junction'
+        source    = (Join-Path $tmp 'src')
+        targets   = @{ Own = $ownTgt }
+        check_db  = $false
+    } | ConvertTo-Json -Depth 8
+    $ownCfgPath = Join-Path $tmp 'cfg-own.json'
+    [System.IO.File]::WriteAllText($ownCfgPath, $ownCfg, (New-Object System.Text.UTF8Encoding($false)))
+    & (Join-Path $root 'sync-skills.ps1') -ConfigPath $ownCfgPath | Out-Null
+    if (-not (Get-Item (Join-Path $ownTgt 'demo-skill') -Force).LinkType) {
+        throw 'FAIL: junction into a source-sibling folder was treated as ours and overwritten'
+    }
+    if ((Get-Content (Join-Path $ownTgt 'demo-skill\SKILL.md') -Raw) -notmatch 'backup') {
+        throw 'FAIL: junction into a source-sibling no longer points at the backup copy'
+    }
+
+    Write-Host 'OK: windows smoke (junction+copy, marker ownership, relative-target symlink kept, sibling-prefix not ours, scripts refresh, dest!=src, Cursor upgrade, -CopyInto)'
 
     # detect-tools: produces a valid config.json that includes Cursor
     & (Join-Path $root 'detect-tools.ps1') -All | Out-Null
@@ -221,15 +263,14 @@ try {
     }
     Write-Host 'OK: detect-tools'
 } finally {
-    # restore repo config.json
+    # restore repo config.json / log, byte-identical
     if ($null -ne $cfgBackup) {
-        [System.IO.File]::WriteAllText($repoConfig, $cfgBackup, (New-Object System.Text.UTF8Encoding($false)))
+        [System.IO.File]::WriteAllBytes($repoConfig, $cfgBackup)
     } else {
         Remove-Item $repoConfig -Force -ErrorAction SilentlyContinue
     }
-    # restore repo log
     if ($null -ne $logBackup) {
-        [System.IO.File]::WriteAllText($log, $logBackup, (New-Object System.Text.UTF8Encoding($true)))
+        [System.IO.File]::WriteAllBytes($log, $logBackup)
     } else {
         Remove-Item $log -Force -ErrorAction SilentlyContinue
     }

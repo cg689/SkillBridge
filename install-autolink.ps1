@@ -1,4 +1,4 @@
-# install-autolink.ps1 — Register the "CC Switch Skills AutoLink" scheduled task.
+﻿# install-autolink.ps1 — Register the "CC Switch Skills AutoLink" scheduled task.
 #
 # Runs sync-skills.ps1 automatically at logon so newly added CC Switch skills are
 # linked into every configured target tool. Optionally also repeats every N minutes.

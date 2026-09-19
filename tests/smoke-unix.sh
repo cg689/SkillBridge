@@ -45,6 +45,10 @@ mkdir -p "$SRC/demo-skill" "$SRC/_archived" "$TGT/own-skill"
 echo "# demo" > "$SRC/demo-skill/SKILL.md"
 echo "# archive" > "$SRC/_archived/SKILL.md"
 ln -s /nonexistent/skillbridge-dead "$TGT/dead-skill"
+# A live symlink with a RELATIVE target must survive pruning: it resolves
+# against the link's own directory, not the process CWD.
+mkdir -p "$TGT/rel-real"
+ln -s "../rel-real" "$TGT/rel-link"
 
 # NOTE: unquoted heredoc collapses `\\` to `\`, so we write 4 backslashes to
 # emit a valid JSON escape (`\\`) and end up with the real value
@@ -102,6 +106,10 @@ if [ -e "$TGT/_archived" ] || [ -L "$TGT/_archived" ]; then
 fi
 if [ -L "$TGT/dead-skill" ] || [ -e "$TGT/dead-skill" ]; then
     echo "FAIL: dead symlink was not pruned" >&2
+    exit 1
+fi
+if [ ! -L "$TGT/rel-link" ] || [ ! -e "$TGT/rel-link" ]; then
+    echo "FAIL: live relative-target symlink was pruned" >&2
     exit 1
 fi
 if [ ! -d "$TGT/own-skill" ]; then
@@ -251,7 +259,30 @@ if ! grep -q 'using copy mode' "$TMP/legacy.err"; then
     exit 1
 fi
 
-echo "OK: unix smoke (link+copy, marker ownership, scripts refresh, dest!=src, Cursor upgrade, --copy-into)"
+# A symlink into a SIBLING of the source shares its string prefix but is not
+# ours: ownership requires the separator (src vs src-backup).
+mkdir -p "${SRC}-backup/demo-skill" "$TMP/own-tgt"
+echo "# backup" > "${SRC}-backup/demo-skill/SKILL.md"
+ln -s "${SRC}-backup/demo-skill" "$TMP/own-tgt/demo-skill"
+cat > "$TMP/cfg-own.json" <<EOF
+{
+  "link_type": "symlink",
+  "source": "$SRC",
+  "targets": { "Own": "$TMP/own-tgt" },
+  "check_db": false
+}
+EOF
+bash "$ROOT/sync-skills.sh" "$TMP/cfg-own.json" >/dev/null 2>&1
+if [ ! -L "$TMP/own-tgt/demo-skill" ]; then
+    echo "FAIL: symlink into a source-sibling was treated as ours and overwritten" >&2
+    exit 1
+fi
+if ! grep -q 'backup' "$TMP/own-tgt/demo-skill/SKILL.md"; then
+    echo "FAIL: source-sibling symlink no longer points at the backup copy" >&2
+    exit 1
+fi
+
+echo "OK: unix smoke (link+copy, marker ownership, relative-target symlink kept, sibling-prefix not ours, scripts refresh, dest!=src, Cursor upgrade, --copy-into)"
 
 # detect-tools.sh --all writes a config that includes every catalogued tool
 if ! bash "$ROOT/detect-tools.sh" --all >/dev/null; then
