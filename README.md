@@ -82,6 +82,7 @@ chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
 {
   "link_type": "junction",
   "source": "%USERPROFILE%\\.cc-switch\\skills",
+  "exclude": [],
   "targets": {
     "Claude Code": "%USERPROFILE%\\.claude\\skills",
     "Cursor":         { "path": "%USERPROFILE%\\.cursor\\skills", "mode": "copy" },
@@ -102,6 +103,7 @@ chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
 
 - `source` — the CC Switch skills library (`%USERPROFILE%\.cc-switch\skills` on Windows, `$HOME/.cc-switch/skills` on Unix).
 - `targets` — a `name → skills directory` map. A value can be a path string (link) or `{ "path": "...", "mode": "copy" }` for tools that cannot follow junctions (Cursor). A leftover `"Cursor": "path"` string, or any path ending in `/.cursor/skills`, is promoted to copy mode. `%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%` (Windows) and `$HOME` (Unix) are expanded automatically. Relative paths like `.cursor/skills` are resolved from the current directory. `detect-tools` keeps extra targets you added that are not in the catalog.
+- `exclude` — a **permanent opt-out list** of catalog tool names (spelled exactly as in `supported-tools.json`). A tool listed here is never written to `targets`, and `detect-tools` will not add it back — **not even with `-All` / `--all`**. Use it for a tool you installed but do not want synced, or one you uninstalled whose config directory still lingers. To bring a tool back, remove it from `exclude` and re-run `detect-tools`. Unknown names are ignored with a warning.
 - `link_type` — `junction` (Windows, no admin required) or `symlink` (Unix). Used only for `mode: link` targets.
 
 See [支持的软件列表.md](支持的软件列表.md) for the full list of supported tools and their default paths. The catalog file [`supported-tools.json`](supported-tools.json) is the source of truth used by both detect-tools scripts.
@@ -155,7 +157,10 @@ Links are live: change a skill in CC Switch and every tool reads the new version
 Tools re-scan their skills directory on session/UI restart — restart the tool.
 
 **A tool doesn't follow junctions / symlinks?**
-Remove it from `targets`, or switch to a copy strategy (replace `New-Item -ItemType Junction` with `Copy-Item -Recurse`).
+Remove it from `targets` **and add its name to `exclude`** (otherwise the next `detect-tools` run adds it straight back), or switch to a copy strategy (`{ "path": "...", "mode": "copy" }`, as Cursor does).
+
+**I removed a tool from `targets`, but `detect-tools` put it back.**
+`detect-tools` decides by "does this tool's config directory exist", and an uninstalled tool often leaves that directory behind — so the target comes back. Add the tool name to `exclude` to opt out permanently; `-All` / `--all` will not override it either.
 
 **Does SkillBridge support Cursor?**
 Yes. The user-level target is `~/.cursor/skills`, and it uses **copy mode** (real directories, not junctions). Cursor does not follow symlinks when discovering skills or when uploading them via *Sync Skills for Cloud Agents*, so a live link would be invisible in Cloud Agents.
@@ -186,6 +191,12 @@ They are pruned automatically (reported as `pruned=` in the summary). Link-mode 
 
 **The script reports `pruned=0` but the folder clearly has broken links?**
 Check that the folder is listed in `targets`. Also note that `Test-Path` does not resolve a junction's target — it returns `True` even for a dead one. The script compares the link's recorded `Target` path instead.
+
+**What if a copy is interrupted halfway (power loss, killed process)?**
+It cannot leave a dead end. The `.skillbridge-copy` ownership marker is written **before** the files are copied, so the partial directory is still recognised as ours and the next sync re-copies it in full. That run logs a `FAILED` line; the repairing run logs `updated=`.
+
+**Can `check-db-sync.py --fix` wipe the database?**
+Not by accident. If the skills folder is empty (wrong `--source`, drive not mounted, folder moved) while the database still has rows, it **refuses** to repair, exits 2 and tells you to check `--source`. Pass `--allow-empty-source` to confirm "yes, I really deleted every skill". Every repair also backs the database up to `~/.cc-switch/backups/` first.
 
 ## Contributing
 

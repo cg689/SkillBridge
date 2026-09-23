@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `exclude` array in `config.json`: a permanent per-tool opt-out. A catalog tool
+  listed there is never written to `targets`, and `detect-tools` will not add it
+  back — not even with `-All` / `--all`. Unknown names are dropped with a warning.
 - `同步到仓库给云端用.bat`: one-click `-CopyInto` into a project repo's
   `.cursor/skills` (path argument, drag-and-drop, or prompt). Documents that
   *Sync Skills for Cloud Agents* often leaves website / Grok Bot VMs with an
@@ -41,8 +44,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `config.example.json` now lists every supported target, not a subset.
 - `支持的软件列表.md` uses portable env-var paths instead of a machine-specific
   `C:\Users\Administrator\...` inventory.
+- `支持的软件列表.md` now answers "where does each agent actually store its
+  data": every target row carries its **data root directory** next to the skills
+  directory, plus a status column (`已同步` / `已排除`). Added the locations
+  SkillBridge does not cover yet (Qoder international, Pi, OpenClaw, AdaL,
+  Claude Desktop) and a section on built-in skill directories that must not be
+  confused with user skills (Cursor `.cursor/skills-cursor/`, MiniMax
+  `.minimax/.builtin-skills/`). All 21 synced paths were verified on 2026-09-23
+  against app-side evidence (usage records, shipped docs/config, the app's own
+  skill folders) or official documentation; the evidence types are documented in
+  the file itself.
 
 ### Fixed
+- `tests/test-catalog.py`'s target-count check was conditional on the phrase
+  "共 N 个" being present in `支持的软件列表.md`, so deleting the phrase deleted
+  the check itself instead of failing — the same class of vacuous guard as the CI
+  dry-run assertion below. A missing phrase is now an explicit failure.
+- A copy that died halfway was never repaired and never warned about. The
+  `.skillbridge-copy` ownership marker was written **after** the files, so a
+  partial copy had no marker, was classified as the tool's own folder and
+  skipped on every later run — stale content forever. The marker is now written
+  **before** the copy starts, so a leftover is recognised as ours and refreshed
+  on the next run. `Copy-SkillDirectory` also refuses to claim a directory it
+  failed to clear, so a failed delete cannot stamp the marker onto a tool's own
+  folder. The Unix `copy_skill_tree` now fails the whole skill copy when a file
+  cannot be copied (it used to swallow the error and log `created` for a partial
+  copy), matching the Windows twin.
+- `check-db-sync.py --fix` could empty CC Switch's entire skill list. An empty
+  (or wrong) skills folder makes every database row look like "folder is gone",
+  so the repair deleted all of them. It now refuses with exit 2 when the folder
+  is empty but the database is not, and points at `--source`; the new
+  `--allow-empty-source` flag is the explicit override for "yes, I really
+  deleted every skill".
+- `install-autolink.ps1 -DryRun` changed things. The `autolink.enabled=false`
+  branch — whose whole job is to unregister the task — was checked before the
+  dry-run branch, so a "preview" could silently delete the real scheduled task.
+  The same guard now also covers `-Unregister -DryRun`.
+- `detect-tools.ps1` / `detect-tools.sh` resurrected a deliberately removed
+  target: they decide by "does the tool's marker directory exist", and an
+  uninstalled tool usually leaves that directory behind, so the target came back
+  on every run. Fixed by the new `exclude` array.
+- `detect-tools` overwrote a hand-edited `$comment` in `config.json`, discarding
+  machine-specific migration notes. It is now preserved.
+- `sync-skills.sh --copy-into` and `install-autolink.sh --interval` with a
+  missing value spun forever, printing nothing: `shift 2` fails silently when
+  only one argument is left, leaving `$1` unchanged, so the option loop never
+  advanced. Both now exit 1 immediately, and `--interval` also rejects a
+  non-numeric value.
+- The CI "AutoLink dry-run" assertion could never fail, in both Windows jobs.
+  `install-autolink.ps1` prints with `Write-Host`, which does not land in
+  `$out = ...`; `$out` is then "automation null" and `$out -notmatch 'DRY-RUN'`
+  returns an **empty array**, which is falsy — so the `throw` was dead code and
+  a real dry-run regression would have shipped green. Fixed with `6>&1` (merge
+  the information stream) plus an explicit empty-output check. The same trap is
+  now guarded in `tests/smoke-windows.ps1`: every sync-summary assertion goes
+  through `Assert-HaveSummary` first, so an early `exit 1` (no summary printed)
+  can no longer make the idempotency checks pass vacuously.
 - Windows dead-link pruning resolved a symlink's *relative* target against the
   process CWD instead of the link's own directory, so a live foreign symlink
   could be declared dead and removed. `sync-skills.ps1` now resolves it the way

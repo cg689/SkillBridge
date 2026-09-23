@@ -92,6 +92,7 @@ chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
 {
   "link_type": "junction",
   "source": "%USERPROFILE%\\.cc-switch\\skills",
+  "exclude": [],
   "targets": {
     "Claude Code": "%USERPROFILE%\\.claude\\skills",
     "Cursor":         { "path": "%USERPROFILE%\\.cursor\\skills", "mode": "copy" },
@@ -112,6 +113,7 @@ chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
 
 - `source`：CC Switch 技能库路径。Windows 上默认 `%USERPROFILE%\.cc-switch\skills`，Unix 上默认 `$HOME/.cc-switch/skills`。
 - `targets`：`名称 → 技能目录` 的映射。值可以是路径字符串（链接），或 `{ "path": "...", "mode": "copy" }`（拷贝真实文件，给不能跟随 junction 的工具，例如 Cursor）。旧配置里的 `"Cursor": "路径"` 字符串、或路径以 `/.cursor/skills` 结尾的项，会自动升为 copy。`%USERPROFILE%`、`%APPDATA%`、`%HERMES_HOME%`（Windows）/ `$HOME`（Unix）会自动展开。相对路径（如 `.cursor/skills`）相对当前目录解析。`detect-tools` 会保留你加过、但不在目录里的自定义目标。
+- `exclude`：**永久排除名单**，写工具名（要跟 `supported-tools.json` 里的名字一致）。列在这里的工具不会出现在 `targets` 里，而且 `detect-tools` **不会再把它加回来 —— 加 `-All` / `--all` 也不会**。适合「这个工具我装了但不想同步」或「工具卸载了但配置目录还在」的情况。想恢复就把名字从 `exclude` 里删掉再跑一次 `detect-tools`。写错的名字会被忽略并在输出里警告。
 - `link_type`：`junction`（Windows 目录联接，无需管理员权限）/ `symlink`（Unix）。只作用于 `mode: link` 的目标。
 
 > 提示：如果某工具的技能目录实际路径不同，直接把 `targets` 里对应行的目录改成工具真正读取的位置即可。
@@ -143,7 +145,10 @@ macOS / Linux 同理：`sync-skills.sh` 会自动把 `%USERPROFILE%` 映射到 `
 链接建好后，工具需要**重启会话/界面**才会重新扫描技能目录。
 
 **某工具不认 junction / symlink？**
-把该工具从 `targets` 里去掉，或用拷贝方案（自行把 `New-Item -ItemType Junction` 换成 `Copy-Item -Recurse`）。
+把该工具从 `targets` 里去掉，**并把它的名字写进 `exclude`**（否则下次跑 `detect-tools` 会被自动加回来），或改用拷贝方案（`{ "path": "...", "mode": "copy" }`，参照 Cursor）。
+
+**我从 `targets` 里删了一个工具，跑 detect-tools 它又回来了？**
+`detect-tools` 的判断依据是「这个工具的配置目录在不在」，而卸载后目录往往还留着，于是它被重新加回 `targets`。把工具名写进 `exclude` 即可永久排除——`-All` / `--all` 也不会加回来。
 
 **支持 Cursor 吗？为什么云端项目调用不到本地 skill？**
 支持。用户级目标是 `~/.cursor/skills`，并且默认是 **copy 模式**（拷贝真实目录，不是 junction/symlink）。Cursor 发现 skill、以及「Sync Skills for Cloud Agents」上传时都**不会跟随符号链接**，所以活链接在云端等于不存在。
@@ -171,6 +176,12 @@ Cursor 为兼容还会读取 `~/.claude/skills`、`~/.codex/skills`、`~/.agents
 
 **删除 CC Switch 里的 skill 后目标目录残留失效链接？**
 脚本会自动清理（汇总里的 `pruned=` 即清理数量）。link 模式只删目标已不存在的重解析点 / 符号链接；copy 模式只删带 `.skillbridge-copy` 标记的目录（或仍指向 CC Switch 源的残留链接）。工具自己的 skill 即使被写进 `.skillbridge-managed.json` 也不会被误删。
+
+**拷贝到一半失败（断电、被中断）会怎样？**
+不会留下死结。归属标记 `.skillbridge-copy` 是**先写标记、再拷文件**，所以半截目录仍被认作"我们的"，下一次同步发现内容对不上就会整体重拷。汇总里那次会记一条 `FAILED`，修好后那次记 `updated=`。
+
+**`check-db-sync.py --fix` 会不会把数据库清空？**
+不会误清。如果技能目录是空的（路径写错、盘没挂上、目录被挪走）而数据库里还有记录，它会**拒绝修复**并以退出码 2 结束，提示你先检查 `--source`。确实要清空时显式加 `--allow-empty-source`。另外每次修复前都会先备份数据库到 `~/.cc-switch/backups/`。
 
 **同步时脚本报 `pruned=0`，但目录里明明有失效链接？**
 先确认该目录在 `targets` 里。另外：`Test-Path` 对 junction **不解析目标**，悬空的也返回 `True`，所以不能用它判断——脚本比对的是链接记录的 `Target` 路径。
