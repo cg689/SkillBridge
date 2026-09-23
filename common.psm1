@@ -316,8 +316,20 @@ function Copy-SkillDirectory {
     # Skip reparse points / the dest-only marker so we never re-copy a link.
     if (Test-Path -LiteralPath $Destination) {
         Remove-SkillEntry $Destination
+        # Do not claim a directory we failed to clear: writing the marker below
+        # into a tool's own folder would make it ours on every later run.
+        if (Test-Path -LiteralPath $Destination) {
+            throw "could not remove existing entry: $Destination"
+        }
     }
     [void][IO.Directory]::CreateDirectory($Destination)
+    # Claim ownership BEFORE copying. Writing the marker last meant a copy that
+    # died halfway left an unmarked directory, which the next run classified as
+    # the tool's own folder and skipped forever — stale content, no warning.
+    # The marker is excluded from the fingerprint, so this changes no comparison.
+    if ($WriteMarker) {
+        Write-CopyMarker $Destination
+    }
     $marker = Get-CopyMarkerName
     foreach ($item in @(Get-ChildItem -LiteralPath $Source -Force -ErrorAction Stop)) {
         if ($item.Name -eq $marker) { continue }
@@ -328,9 +340,6 @@ function Copy-SkillDirectory {
         } else {
             [IO.File]::Copy($item.FullName, $target, $true)
         }
-    }
-    if ($WriteMarker) {
-        Write-CopyMarker $Destination
     }
 }
 

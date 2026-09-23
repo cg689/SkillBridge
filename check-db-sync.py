@@ -14,11 +14,13 @@ Called automatically at the end of sync-skills.ps1 / sync-skills.sh (unless
 
 Usage:
     python check-db-sync.py [--fix] [--quiet] [--log FILE] [--source DIR] [--db FILE]
+                            [--allow-empty-source]
 
 Exit codes:
     0  in sync, or drift repaired
     1  drift found but not repaired (no --fix)
-    2  could not run (missing paths, unreadable database) or --fix failed
+    2  could not run (missing paths, unreadable database), --fix failed, or --fix
+       refused to empty the database because the skills folder is empty
 """
 import argparse
 import hashlib
@@ -151,6 +153,11 @@ def main():
     parser.add_argument("--log", metavar="FILE", help="also append output to FILE (UTF-8)")
     parser.add_argument("--source", default=DEFAULT_SOURCE, help="skills folder to check")
     parser.add_argument("--db", default=DEFAULT_DB, help="path to cc-switch.db")
+    parser.add_argument(
+        "--allow-empty-source",
+        action="store_true",
+        help="with --fix, permit removing every row when the skills folder is empty",
+    )
     args = parser.parse_args()
 
     if args.log:
@@ -191,6 +198,19 @@ def main():
     if not args.fix:
         print("\nhint: rerun with --fix to repair (the database is backed up first)")
         return 1
+
+    # Safety rail: an empty skills folder is far more likely to mean "wrong
+    # --source", "the drive is not mounted yet" or "the folder was moved" than
+    # "the user really deleted all 170 skills". Removing every row in that case
+    # wipes CC Switch's skill list, so refuse unless the caller insists.
+    if not source and database and not args.allow_empty_source:
+        print(
+            f"\n[refused] the skills folder is empty ({args.source}) but the database "
+            f"holds {len(database)} rows."
+        )
+        print("          Repairing would delete every row. Check --source first.")
+        print("          If the folder really is empty on purpose, pass --allow-empty-source.")
+        return 2
 
     backup_dir = os.path.join(os.path.dirname(args.db), "backups")
     os.makedirs(backup_dir, exist_ok=True)

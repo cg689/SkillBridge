@@ -8,8 +8,11 @@
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-autolink.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-autolink.ps1 -IntervalMinutes 10
-#   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-autolink.ps1 -DryRun   # preview only, no registration
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-autolink.ps1 -DryRun   # preview only, changes NOTHING
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-autolink.ps1 -Unregister
+#
+# -DryRun never registers, never unregisters and never deletes anything — not even
+# when combined with -Unregister or when autolink.enabled is false.
 param(
     [string]$TaskName   = 'CCSwitch Skills AutoLink',
     [string]$ScriptPath = (Join-Path $PSScriptRoot 'sync-skills.ps1'),
@@ -28,12 +31,25 @@ $autolink = if ($cfg -and $cfg.autolink) { $cfg.autolink } else { $null }
 $al = Get-AutolinkDefaults $autolink
 
 if ($Unregister) {
+    # -DryRun wins over -Unregister: the flag promises "change nothing", and an
+    # explicit -Unregister next to it reads as "show me what that would do".
+    if ($DryRun) {
+        Write-Host "[DRY-RUN] would unregister task '$TaskName' (nothing changed)."
+        exit 0
+    }
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
     Write-Host "Unregistered task '$TaskName'."
     exit 0
 }
 
 if (-not $al.enabled) {
+    # Checked BEFORE the $DryRun branch further down, so this path used to
+    # unregister the real task during a "preview". Keep dry-run side-effect free.
+    if ($DryRun) {
+        Write-Host ("[DRY-RUN] autolink.enabled=false in config.json: would unregister " +
+            "task '$TaskName' and register nothing.")
+        exit 0
+    }
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
     Write-Host "AutoLink disabled by config (autolink.enabled=false). Not registering."
     exit 0

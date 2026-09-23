@@ -20,7 +20,13 @@ COPY_INTO=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --copy-into)
-            COPY_INTO="${2:-}"
+            # Guard the value: `shift 2` with only one argument left fails silently
+            # and leaves $1 unchanged, so the loop would spin forever with no output.
+            if [ $# -lt 2 ]; then
+                echo "[ERROR] --copy-into needs a directory argument" >&2
+                exit 1
+            fi
+            COPY_INTO="$2"
             shift 2
             ;;
         -h|--help)
@@ -281,15 +287,35 @@ copy_skill_tree() {
         if [ -L "$item" ]; then
             continue
         elif [ -d "$item" ]; then
-            copy_skill_tree "$item" "$dest_item"
+            copy_skill_tree "$item" "$dest_item" || return 1
         elif [ -f "$item" ]; then
-            cp -f "$item" "$dest_item"
+            # A file we cannot copy must fail the whole skill copy, not be
+            # silently skipped: the caller logs FAILED and retries next run.
+            # Swallowing it here produced a "created" line for a partial copy.
+            cp -f "$item" "$dest_item" || return 1
         fi
     done < <(find "$src" -mindepth 1 -maxdepth 1 -print0)
 }
 
 write_copy_marker() {
+    mkdir -p "$1"
     printf 'skillbridge-copy\n' > "$1/$COPY_MARKER"
+}
+
+claim_copy_dest() {
+    # Clear any previous entry, then claim the directory with our marker BEFORE
+    # the files are copied. Writing the marker last meant a copy that died
+    # halfway left an unmarked directory, which the next run classified as the
+    # tool's own folder and skipped forever — stale content, no warning.
+    # Refuses to claim if the old entry could not be removed, so a failed delete
+    # can never stamp our marker onto a tool's own folder.
+    local dest="$1"
+    rm_skill_entry "$dest"
+    if [ -e "$dest" ] || [ -L "$dest" ]; then
+        echo "could not remove existing entry: $dest" >&2
+        return 1
+    fi
+    write_copy_marker "$dest"
 }
 
 name_in_list() {
@@ -355,7 +381,7 @@ if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
                 else
                     existed=0
                 fi
-                if err="$( { rm_skill_entry "$dest" && copy_skill_tree "$skill" "$dest" && write_copy_marker "$dest"; } 2>&1 )"; then
+                if err="$( { claim_copy_dest "$dest" && copy_skill_tree "$skill" "$dest"; } 2>&1 )"; then
                     if [ "$existed" -eq 1 ]; then
                         updated=$((updated+1))
                         echo "updated  $tool : $name" >> "$LOG"

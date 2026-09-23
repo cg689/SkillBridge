@@ -20,7 +20,22 @@ INTERVAL_MIN="${INTERVAL_MIN:-}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --interval) INTERVAL_MIN="${2:-0}"; shift 2 ;;
+        --interval)
+            # Guard the value: `shift 2` with only one argument left fails silently
+            # and leaves $1 unchanged, so the loop would spin forever with no output.
+            if [ $# -lt 2 ]; then
+                echo "[ERROR] --interval needs a number of minutes" >&2
+                exit 1
+            fi
+            case "$2" in
+                ''|*[!0-9]*)
+                    echo "[ERROR] --interval must be a whole number of minutes, got: $2" >&2
+                    exit 1
+                    ;;
+            esac
+            INTERVAL_MIN="$2"
+            shift 2
+            ;;
         --dry-run) DRY_RUN=1; shift ;;
         --uninstall)
             if [ "$(uname)" = "Darwin" ]; then

@@ -1,7 +1,8 @@
 {
-  "$comment": "SkillBridge — portable example (env-var paths resolve on any machine). Copy to config.json or run detect-tools.ps1 / detect-tools.sh to generate one for this machine. Target list matches supported-tools.json.",
+  "$comment": "SkillBridge — portable example (env-var paths resolve on any machine). Copy to config.json or run detect-tools.ps1 / detect-tools.sh to generate one for this machine. Target list matches supported-tools.json. List a tool name in \"exclude\" to keep it out of targets permanently — detect-tools will not add it back, not even with -All / --all.",
   "link_type": "junction",
   "source": "%USERPROFILE%\\.cc-switch\\skills",
+  "exclude": [],
   "targets": {
     "Claude Code": "%USERPROFILE%\\.claude\\skills",
     "Cursor": {
