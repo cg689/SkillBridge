@@ -41,7 +41,14 @@ def main():
         )
 
     count_match = re.search(r"共\s*(\d+)\s*个", listing)
-    if count_match and int(count_match.group(1)) != len(catalog_names):
+    if not count_match:
+        # Without this, deleting the phrase silently deletes the check itself —
+        # a guard that disappears instead of failing is worse than no guard.
+        errors.append(
+            "支持的软件列表.md no longer contains '共 N 个', so the target count "
+            "cannot be verified (the count check would be skipped)"
+        )
+    elif int(count_match.group(1)) != len(catalog_names):
         errors.append(
             "支持的软件列表.md says 共 %s 个 but catalog has %d"
             % (count_match.group(1), len(catalog_names))

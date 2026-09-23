@@ -4,7 +4,13 @@
 # twice, and asserts: junction created, idempotent on second run, underscore
 # archives skipped, dead junctions pruned, tool-owned dirs left alone. Also runs
 # detect-tools.ps1 -All and asserts it produces a valid config.json that includes
-# Cursor. Restores the repo's sync-skills.log and config.json afterwards.
+# Cursor, honours `exclude` (never re-adds a deliberately removed tool) and keeps
+# custom targets; that a copy which died halfway is left marked and repaired on
+# the next run; and asserts install-autolink.ps1 -DryRun changes nothing even
+# when autolink.enabled=false. Summary assertions go through Assert-HaveSummary
+# first, because `$x -notmatch 'y'` on a command that printed nothing returns an
+# empty array and passes silently. Restores the repo's sync-skills.log and
+# config.json afterwards.
 #
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\smoke-windows.ps1
 $ErrorActionPreference = 'Stop'
@@ -65,8 +71,21 @@ try {
     # start from an empty log so this run's lines are easy to grep; finally restores it
     [System.IO.File]::WriteAllText($log, '', (New-Object System.Text.UTF8Encoding($false)))
 
+    # A command that produced no output assigns "automation null". `$x -notmatch 'y'`
+    # on that returns an EMPTY ARRAY, which is falsy — so every `-notmatch` assertion
+    # below would silently pass. sync-skills.ps1 exits early (exit 1) without printing
+    # a summary when the config/source is bad, which is exactly when these guards
+    # matter most. Check the output is real before trusting any of them.
+    function Assert-HaveSummary {
+        param([string]$Text, [string]$Context)
+        if ([string]::IsNullOrWhiteSpace($Text)) {
+            throw "FAIL: $Context produced no summary output (its assertions would be vacuous)"
+        }
+    }
+
     # run 1: link created; unresolved-%VAR% target skipped (not counted, no literal dir)
     $out1 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
+    Assert-HaveSummary $out1 'first run'
     if ($out1 -notmatch 'created=2') {
         throw "FAIL: first run expected created=2 (link+copy), got: $out1"
     }
@@ -132,6 +151,7 @@ try {
 
     # run 2: idempotent
     $out2 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
+    Assert-HaveSummary $out2 'second run'
     if ($out2 -notmatch 'skipped=2') {
         throw "FAIL: second run not idempotent (expected skipped=2, got: $out2)"
     }
@@ -150,6 +170,7 @@ try {
         throw 'FAIL: copy dest changed when source was edited — dest is not an independent copy'
     }
     $out3 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
+    Assert-HaveSummary $out3 'refresh-after-edit run'
     if ($out3 -notmatch 'updated=1') {
         throw "FAIL: copy target should refresh after SKILL.md change, got: $out3"
     }
@@ -162,6 +183,7 @@ try {
     Set-Content -Path (Join-Path $tmp 'src\demo-skill\scripts\run.sh') -Value 'echo hi' -Encoding UTF8
     Set-Content -Path (Join-Path $tmp 'src\demo-skill\.hidden-note') -Value 'hidden' -Encoding UTF8
     $outScripts = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
+    Assert-HaveSummary $outScripts 'refresh-after-scripts run'
     if ($outScripts -notmatch 'updated=1') {
         throw "FAIL: copy target should refresh after scripts/ change, got: $outScripts"
     }
@@ -171,6 +193,40 @@ try {
     if (-not (Test-Path (Join-Path $tmp 'tgt-copy\demo-skill\.hidden-note'))) {
         throw 'FAIL: hidden file inside skill was not copied'
     }
+
+    # --- fault injection: a copy that dies halfway must stay repairable -------
+    # The marker is written BEFORE the files, so a leftover partial copy is still
+    # recognised as ours on the next run. Writing it last made the leftover look
+    # like a tool-owned folder: skipped forever, no warning, stale content.
+    # An exclusive lock on a source file makes [IO.File]::Copy throw mid-copy.
+    $lockSkill = Join-Path $tmp 'src\locked-skill'
+    New-Item -ItemType Directory -Path $lockSkill -Force | Out-Null
+    Set-Content -Path (Join-Path $lockSkill 'SKILL.md') -Value '# locked' -Encoding UTF8
+    $lockFile = Join-Path $lockSkill 'payload.bin'
+    [IO.File]::WriteAllText($lockFile, 'payload')
+    $handle = [IO.File]::Open(
+        $lockFile, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    try {
+        $outLock = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
+        Assert-HaveSummary $outLock 'locked-source run'
+        if ($outLock -notmatch 'failed=1') {
+            throw "FAIL: the exclusive lock did not make the copy fail (got: $outLock)"
+        }
+    } finally {
+        $handle.Dispose()
+    }
+    if (-not (Test-Path (Join-Path $tmp 'tgt-copy\locked-skill\.skillbridge-copy'))) {
+        throw 'FAIL: a copy that died halfway left an UNMARKED directory (it would be skipped forever)'
+    }
+    $outRepair = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
+    Assert-HaveSummary $outRepair 'repair-after-failure run'
+    if ($outRepair -notmatch 'updated=1') {
+        throw "FAIL: the marked leftover was not repaired, got: $outRepair"
+    }
+    if (-not (Test-Path (Join-Path $tmp 'tgt-copy\locked-skill\payload.bin'))) {
+        throw 'FAIL: the repair did not copy the file that failed before'
+    }
+    Write-Host 'OK: half-written copy is marked and repaired'
 
     $copyInto = Join-Path $tmp 'proj\.cursor\skills'
     $out4 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath -CopyInto $copyInto
@@ -262,6 +318,49 @@ try {
         throw "FAIL: detect-tools dropped extra target MyCustom, got: $($gen2.targets | ConvertTo-Json -Compress)"
     }
     Write-Host 'OK: detect-tools'
+
+    # `exclude` must beat -All: a tool whose marker dir lingers after uninstall
+    # would otherwise be re-added on every detect-tools run, silently undoing a
+    # deliberate removal.
+    $exclCfg = Get-Content $repoConfig -Raw | ConvertFrom-Json
+    $exclCfg.exclude = @('Codex', 'Doubao')
+    [System.IO.File]::WriteAllText($repoConfig, ($exclCfg | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
+    & (Join-Path $root 'detect-tools.ps1') -All | Out-Null
+    $gen3 = Get-Content $repoConfig -Raw | ConvertFrom-Json
+    if ($gen3.targets.Codex -or $gen3.targets.Doubao) {
+        throw "FAIL: detect-tools -All re-added an excluded target (targets: $($gen3.targets.PSObject.Properties.Name -join ', '))"
+    }
+    if (($gen3.exclude -join ',') -ne 'Codex,Doubao') {
+        throw "FAIL: detect-tools did not round-trip exclude (got: $($gen3.exclude -join ','))"
+    }
+    if (-not $gen3.targets.Cursor -or -not $gen3.targets.'Claude Code') {
+        throw 'FAIL: excluding two tools dropped the others'
+    }
+    Write-Host 'OK: detect-tools honours exclude'
+
+    # -DryRun must change NOTHING. The autolink.enabled=false branch is the trap:
+    # its real job is to unregister the task, so a preview used to delete it.
+    $alCfg = Get-Content $repoConfig -Raw | ConvertFrom-Json
+    $alCfg.autolink.enabled = $false
+    [System.IO.File]::WriteAllText($repoConfig, ($alCfg | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
+    # 6>&1 merges the INFORMATION stream: install-autolink.ps1 prints with
+    # Write-Host, which never lands in a plain `$out = ...`. Without it $out is
+    # "automation null", `$out -notmatch 'X'` returns an EMPTY ARRAY, and the
+    # `if` below could never fire — a vacuous assertion.
+    $dryOut = & (Join-Path $root 'install-autolink.ps1') -DryRun -TaskName 'SB-DryRun-Probe' 6>&1 | Out-String
+    if ([string]::IsNullOrWhiteSpace($dryOut)) {
+        throw 'FAIL: install-autolink -DryRun produced no capturable output (assertion would be vacuous)'
+    }
+    if ($dryOut -notmatch 'DRY-RUN') {
+        throw "FAIL: -DryRun with autolink.enabled=false did not report DRY-RUN (got: $dryOut)"
+    }
+    if ($dryOut -match 'Unregistered task') {
+        throw "FAIL: -DryRun took the unregister path (got: $dryOut)"
+    }
+    if (Get-ScheduledTask -TaskName 'SB-DryRun-Probe' -ErrorAction SilentlyContinue) {
+        throw 'FAIL: -DryRun registered a task'
+    }
+    Write-Host 'OK: install-autolink -DryRun is side-effect free'
 } finally {
     # restore repo config.json / log, byte-identical
     if ($null -ne $cfgBackup) {

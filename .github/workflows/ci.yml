@@ -50,7 +50,12 @@ jobs:
       - name: AutoLink dry-run (no real registration)
         shell: pwsh
         run: |
-          $out = .\install-autolink.ps1 -DryRun
+          # 6>&1 merges the INFORMATION stream: the script prints with Write-Host,
+          # which never lands in a plain `$out = ...`. Without it $out is
+          # "automation null" and `$out -notmatch 'DRY-RUN'` returns an EMPTY
+          # ARRAY, so this assertion could never fail.
+          $out = .\install-autolink.ps1 -DryRun 6>&1 | Out-String
+          if ([string]::IsNullOrWhiteSpace($out)) { throw "dry-run produced no output (vacuous assertion)" }
           if ($out -notmatch 'DRY-RUN') { throw "expected DRY-RUN output, got: $out" }
           $t = Get-ScheduledTask -TaskName 'CCSwitch Skills AutoLink' -ErrorAction SilentlyContinue
           if ($null -ne $t) { throw "dry-run must not register the task" }
@@ -78,7 +83,10 @@ jobs:
       - name: AutoLink dry-run (no real registration)
         shell: powershell
         run: |
-          $out = .\install-autolink.ps1 -DryRun
+          # 6>&1 merges the INFORMATION stream — see the pwsh job above. Without
+          # it this assertion is a no-op that can never fail.
+          $out = .\install-autolink.ps1 -DryRun 6>&1 | Out-String
+          if ([string]::IsNullOrWhiteSpace($out)) { throw "dry-run produced no output (vacuous assertion)" }
           if ($out -notmatch 'DRY-RUN') { throw "expected DRY-RUN output, got: $out" }
           $t = Get-ScheduledTask -TaskName 'CCSwitch Skills AutoLink' -ErrorAction SilentlyContinue
           if ($null -ne $t) { throw "dry-run must not register the task" }

@@ -157,6 +157,43 @@ class CheckDbSyncTests(unittest.TestCase):
         conn.close()
         self.assertEqual(directories, ["keep-me"])
 
+    def test_fix_refuses_to_empty_the_database(self):
+        """An empty skills folder is usually a wrong --source, not a real delete."""
+        conn = sqlite3.connect(self.db)
+        for name in ("alpha", "beta"):
+            conn.execute(
+                "INSERT INTO skills (id, name, directory, enabled_codex) VALUES (?,?,?,1)",
+                ("local:" + name, name, name),
+            )
+        conn.commit()
+        conn.close()
+        result = run_check(self.source, self.db, extra=["--fix"])
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("refused", result.stdout)
+        conn = sqlite3.connect(self.db)
+        count = conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0]
+        conn.close()
+        self.assertEqual(count, 2, "the refusal must not remove anything")
+        self.assertFalse(
+            os.path.isdir(os.path.join(self.tmp.name, "backups")),
+            "a refused repair must not leave a backup behind",
+        )
+
+    def test_fix_allows_empty_source_when_asked(self):
+        conn = sqlite3.connect(self.db)
+        conn.execute(
+            "INSERT INTO skills (id, name, directory, enabled_codex) "
+            "VALUES ('gone', 'gone', 'gone', 1)"
+        )
+        conn.commit()
+        conn.close()
+        result = run_check(self.source, self.db, extra=["--fix", "--allow-empty-source"])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        conn = sqlite3.connect(self.db)
+        count = conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0]
+        conn.close()
+        self.assertEqual(count, 0)
+
     def test_missing_db_exits_2(self):
         result = run_check(self.source, os.path.join(self.tmp.name, "nope.db"))
         self.assertEqual(result.returncode, 2)

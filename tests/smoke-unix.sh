@@ -5,8 +5,11 @@
 # twice, and asserts: link created, idempotent on second run. Also asserts that an
 # unset %HERMES_HOME% target is skipped with a warning and never degrades to
 # creating /skills at the filesystem root; that underscore-prefixed archives are
-# not linked; that dead symlinks are pruned; and that detect-tools.sh --all
-# writes a valid config.json. Restores the repo log and config.json afterwards.
+# not linked; that dead symlinks are pruned; that a copy which died halfway is
+# left marked and repaired on the next run; that detect-tools.sh --all
+# writes a valid config.json and honours `exclude`; and that a missing/invalid
+# option value fails fast instead of spinning. Restores the repo log and
+# config.json afterwards.
 #
 # Usage: bash tests/smoke-unix.sh
 set -eu
@@ -201,6 +204,33 @@ if [ -e "$TGT-copy/demo-skill/outside-link" ] || [ -L "$TGT-copy/demo-skill/outs
     exit 1
 fi
 
+# --- fault injection: a copy that dies halfway must stay repairable ---------
+# The marker is written BEFORE the files, so a leftover partial copy is still
+# recognised as ours on the next run. Writing it last made the leftover look
+# like a tool-owned folder: skipped forever, no warning, stale content.
+# An unreadable source file makes the copy fail. Skipped as root, where mode
+# bits do not block reads (so the injection would be a no-op).
+if [ "$(id -u)" != "0" ]; then
+    mkdir -p "$SRC/locked-skill"
+    echo "# locked" > "$SRC/locked-skill/SKILL.md"
+    echo payload > "$SRC/locked-skill/payload.bin"
+    chmod 000 "$SRC/locked-skill/payload.bin" 2>/dev/null || true
+    bash "$ROOT/sync-skills.sh" "$TMP/cfg.json" >/dev/null 2>&1 || true
+    if [ ! -f "$TGT-copy/locked-skill/.skillbridge-copy" ]; then
+        echo "FAIL: a copy that died halfway left an UNMARKED directory (skipped forever)" >&2
+        exit 1
+    fi
+    chmod 644 "$SRC/locked-skill/payload.bin" 2>/dev/null || true
+    bash "$ROOT/sync-skills.sh" "$TMP/cfg.json" >/dev/null 2>&1 || true
+    if [ ! -f "$TGT-copy/locked-skill/payload.bin" ]; then
+        echo "FAIL: the marked leftover was not repaired on the next run" >&2
+        exit 1
+    fi
+    echo "OK: unix half-written copy is marked and repaired"
+else
+    echo "SKIP: unix half-written-copy check (running as root; mode bits do not block reads)"
+fi
+
 mkdir -p "$SRC/gone-skill"
 echo "# gone" > "$SRC/gone-skill/SKILL.md"
 bash "$ROOT/sync-skills.sh" "$TMP/cfg.json" >/dev/null
@@ -318,6 +348,63 @@ cfg = json.load(open(sys.argv[1], encoding="utf-8"))
 if cfg.get("targets", {}).get("MyCustom") != "/tmp/skillbridge-custom-skills":
     sys.exit("FAIL: detect-tools.sh dropped extra target MyCustom, got %r" % cfg.get("targets"))
 print("OK: detect-tools.sh kept extra target")
+PY
+then
+    exit 1
+fi
+
+# --- option parsing must fail fast, never spin -------------------------------
+# `shift 2` with a missing value fails silently and leaves $1 unchanged, so the
+# option loop would hang forever printing nothing. timeout(1) turns that into a
+# visible failure instead of a stuck CI job.
+expect_fast_fail() {
+    local desc="$1"
+    shift
+    local rc
+    set +e
+    timeout 10 "$@" >/dev/null 2>&1
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ] || [ "$rc" -eq 124 ]; then
+        echo "FAIL: $desc should exit non-zero immediately (rc=$rc; 124 means it was still spinning)" >&2
+        exit 1
+    fi
+}
+expect_fast_fail "--copy-into with no value" bash "$ROOT/sync-skills.sh" --copy-into
+expect_fast_fail "--interval with no value" bash "$ROOT/install-autolink.sh" --interval
+expect_fast_fail "--interval with a non-numeric value" bash "$ROOT/install-autolink.sh" --interval abc
+echo "OK: shell option parsing fails fast on a missing/invalid value"
+
+if ! bash "$ROOT/install-autolink.sh" --interval 30 --dry-run | grep -q 'every 30min'; then
+    echo "FAIL: --interval 30 was not honoured by --dry-run" >&2
+    exit 1
+fi
+echo "OK: --interval passes through"
+
+# --- detect-tools.sh honours exclude ----------------------------------------
+python3 - "$REPO_CONFIG" <<'PY'
+import json, sys
+path = sys.argv[1]
+cfg = json.load(open(path, encoding="utf-8"))
+cfg["exclude"] = ["Codex", "Doubao"]
+json.dump(cfg, open(path, "w", encoding="utf-8"), indent=2)
+PY
+if ! bash "$ROOT/detect-tools.sh" --all >/dev/null; then
+    echo "FAIL: detect-tools.sh --all exited non-zero with an exclude list" >&2
+    exit 1
+fi
+if ! python3 - "$REPO_CONFIG" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+targets = cfg.get("targets") or {}
+for name in ("Codex", "Doubao"):
+    if name in targets:
+        sys.exit("FAIL: detect-tools.sh --all re-added excluded target %s" % name)
+if cfg.get("exclude") != ["Codex", "Doubao"]:
+    sys.exit("FAIL: exclude was not round-tripped, got %r" % cfg.get("exclude"))
+if "Cursor" not in targets:
+    sys.exit("FAIL: excluding two tools dropped the others")
+print("OK: detect-tools.sh honours exclude")
 PY
 then
     exit 1
