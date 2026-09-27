@@ -65,6 +65,13 @@ first to discuss it.
   `python tests/test-catalog.py && python tests/test-check-db-sync.py`
 - Unix smoke: `bash tests/smoke-unix.sh`
 - Windows smoke: `powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\smoke-windows.ps1`
+- Dashboard (starts its own server and fixture source, drives it over HTTP):
+  `powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\smoke-webui.ps1`
+- The dashboard page's own script (needs a Node 18+ on PATH): `python scanjs.py`
+  — extracts the inline `<script>`, runs `node --check` on it and reports every
+  identifier the page calls but never defines. The page has no build step and no
+  import list, so this is the only thing that catches a missing function before
+  somebody clicks the button that calls it.
 
 ## Style Guide
 

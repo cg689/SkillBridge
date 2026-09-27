@@ -6,3 +6,8 @@
 
 # PowerShell scripts
 *.ps1 text eol=crlf
+
+# Vendored third-party builds are byte-identical to their release, so no
+# line-ending rewriting may touch them (see assets/README.md).
+assets/vendor/*.js    -text
+assets/vendor/*.woff2 -text

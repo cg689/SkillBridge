@@ -87,7 +87,7 @@ Skills can also be **managed from the page**. Both of these act on `config.json`
 
 Both are ordinary POSTs (`/api/skills/add`, `/api/skills/delete`) behind the same per-start token as everything else. `tests/smoke-webui.ps1` drives both over HTTP against a throwaway source — a valid package, a duplicate name, an escaping entry, non-zip bytes, an oversized body, an illegal name, a missing skill, a folder without `SKILL.md` — and checks what is actually on disk afterwards.
 
-The page itself was rebuilt on shadcn's **semantic tokens** (`--background`, `--foreground`, `--muted-foreground`, `--destructive`, one radius scale), so light and dark are one stylesheet with two palettes instead of two designs — the button in the top bar switches, and the choice is remembered. Everything is still inlined: no CDN, no build step, nothing fetched but the page's own API. Around that: a real ARIA tablist (`role="tab"`, `aria-selected`, roving `tabindex`, ←/→/Home/End); both dialogs are `role="dialog"` with `aria-modal="true"`, the page behind them `inert`, a Tab trap, Escape to cancel and focus returned to the button that opened them; a visible `:focus-visible` ring on every control; `/` focuses the search box; and a skeleton while the skill list loads instead of an empty panel, all of it quieted under `prefers-reduced-motion`.
+The page is built on four real libraries, downloaded once and committed under `assets/vendor/` — **Lucide** 0.469.0 (the icons), **Motion One** 10.18.0 (the animations), and the variable cuts of **Inter** and **JetBrains Mono** (the type) — so it needs no CDN, no build step and no network at run time; `web-ui.ps1` serves them from `/assets/` through a fixed whitelist of four file names, and the page still degrades quietly if one is missing. Motion is driven by Motion One, the static CSS is the final state, and everything quiets down under `prefers-reduced-motion`. On top of the shadcn-style **semantic tokens** (`--background`, `--foreground`, `--muted-foreground`, `--destructive`, one radius scale), light and dark are one stylesheet with two palettes instead of two designs — the button in the sidebar switches, and the choice is remembered (first visit follows the OS). Everything else is interaction and accessibility: a real ARIA tablist (`role="tab"`, `aria-selected`, roving `tabindex`, ←/→/Home/End); both dialogs are `role="dialog"` with `aria-modal="true"`, the page behind them `inert`, a Tab trap, Escape to cancel and focus returned to the button that opened them; a visible `:focus-visible` ring on every control; `/` focuses the search box; and a skeleton while the skill list loads instead of an empty panel.
 
 Two design points worth knowing:
 
@@ -170,6 +170,7 @@ SkillBridge/
 ├── check-db-sync.py        # compare/report CC Switch's skill DB (called by sync)
 ├── web-ui.ps1              # local dashboard server (Windows, loopback-only)
 ├── web-ui.html             # the dashboard page web-ui.ps1 serves
+├── assets/vendor/          # the third-party libraries the page loads (offline)
 ├── skill-catalog.zh-CN.json   # dashboard overlay: category + Chinese intro per skill
 ├── tools/                  # one-off build-script for skill-catalog.zh-CN.json
 ├── 启动WebUI.bat           # double-click to open the dashboard

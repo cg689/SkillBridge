@@ -11,6 +11,12 @@
 #     whole CSRF defence, so it must not depend on which method or path is used
 #   * GET /api/sync and GET /api/db-check are 405: both run something
 #   * an unknown /api/ path with a valid token is 404
+#   * the vendored assets (/assets/vendor/…: Lucide, Motion One, Inter,
+#     JetBrains Mono) are served without a token, with the right MIME type, a
+#     real length and no-store — and that the whitelist refuses anything else,
+#     including a directory, a name that is not installed and a `..` that
+#     escapes assets/ (sent over a raw socket, because a normal HTTP client
+#     normalises `..` away before the server ever sees it)
 #   * GET /api/status is the shared snapshot (source, skill count, per-target
 #     linked/missing) and it changes as the sync lands
 #   * GET /api/skills is the skill browser's payload: description folded out of
@@ -160,6 +166,44 @@ function Get-JsonResult {
     }
 }
 
+# One request over a raw socket, so the path goes on the wire exactly as it is
+# written. Invoke-Api (HttpWebRequest) cannot do this: the Uri class compacts
+# ".." out of a path before it is sent, so a traversal check made through it
+# would be testing the client's own normalisation and nothing else. This one is
+# also the only way to read the response head of a font without dragging its
+# bytes through a string.
+function Invoke-Raw {
+    param([string]$Method = 'GET', [string]$Path)
+    $client = New-Object System.Net.Sockets.TcpClient
+    $client.Connect([System.Net.IPAddress]::Loopback, $script:Port)
+    $stream = $client.GetStream()
+    $reqHead = "$Method /$Path HTTP/1.0`r`nHost: 127.0.0.1`r`nConnection: close`r`n`r`n"
+    $bytes = [Text.Encoding]::ASCII.GetBytes($reqHead)
+    $stream.Write($bytes, 0, $bytes.Length)
+    $stream.Flush()
+    $ms = New-Object IO.MemoryStream
+    $buf = New-Object 'byte[]' 8192
+    while (($n = $stream.Read($buf, 0, $buf.Length)) -gt 0) { $ms.Write($buf, 0, $n) }
+    $stream.Close()
+    $client.Close()
+    $all = [Text.Encoding]::ASCII.GetString($ms.ToArray())
+    $split = $all.IndexOf("`r`n`r`n")
+    $headText = if ($split -ge 0) { $all.Substring(0, $split) } else { $all }
+    $head = @{}
+    $code = 0
+    foreach ($line in ($headText -split "`r?`n")) {
+        if ($line -match '^HTTP/\d\.\d\s+(\d+)') { $code = [int]$Matches[1] }
+        elseif ($line -match '^([^:]+):\s*(.*)$') { $head[$Matches[1]] = $Matches[2] }
+    }
+    return [pscustomobject]@{
+        code   = $code
+        type   = $head['Content-Type']
+        cache  = $head['Cache-Control']
+        length = if ($head['Content-Length']) { [int]$head['Content-Length'] } else { 0 }
+        text   = $all
+    }
+}
+
 # ------------------------------------------------------------ start server ----
 $ui = Join-Path $root 'web-ui.ps1'
 if (-not (Test-Path -LiteralPath $ui)) { throw "FAIL: web-ui.ps1 not found: $ui" }
@@ -278,8 +322,16 @@ try {
     if ($page.text -notmatch 'id="view-skills"\s+hidden') {
         throw 'FAIL: the skills view no longer starts hidden, so the page reads the skill list on every open'
     }
-    if ($page.text -notmatch 'id="skill-cats"' -or $page.text -notmatch 'data-cat="all"') {
-        throw 'FAIL: the category filter (全部 + one chip per category) is gone from the skill view'
+    # The chip row is now painted by renderCats() from the payload, so the
+    # 全部 chip is a literal in the script rather than a static button here.
+    if ($page.text -notmatch 'id="skill-cats"') {
+        throw 'FAIL: the category filter row is gone from the skill view'
+    }
+    if ($page.text -notmatch "id:\s*'all',\s*name:\s*'全部'") {
+        throw 'FAIL: the category filter no longer builds the 全部 chip, so skills of every category cannot be listed again'
+    }
+    if ($page.text -notmatch "skill-cats'\)\.innerHTML") {
+        throw 'FAIL: nothing writes the category chips into #skill-cats, so the filter row stays empty'
     }
     if ($page.text -notmatch '\.cat-chip\b' -or $page.text -notmatch '\.skill-group-head\b') {
         throw 'FAIL: the skill view lost the styles for the category chips and the per-category group headers'
@@ -287,11 +339,29 @@ try {
     if ($page.text -notmatch 's\.intro' -or $page.text -notmatch 'skillState\.cat') {
         throw "FAIL: the skill list no longer renders the Chinese intro (`s.intro`) or filters by category"
     }
-    # The carets on the skill groups and rows are referenced by the row builder;
-    # the symbol itself used to be missing, so every one of them rendered as an
-    # empty box and the list looked like it had no fold/unfold affordance.
-    if ($page.text -notmatch '<symbol id="i-chevron"') {
-        throw 'FAIL: #i-chevron is used by the skill rows but never defined, so the carets are invisible'
+    # -- the vendored libraries the page is built on --------------------------
+    # The icons, the animation and the type are all downloaded once into the
+    # repository (see assets/README.md) and served from /assets/, so the page
+    # needs no network at runtime. If a link here goes stale the page silently
+    # degrades - no icons, no motion - so the guards check the page really names
+    # the files and that the server really ships them.
+    foreach ($asset in @('assets/vendor/lucide.min.js', 'assets/vendor/motion.min.js',
+                         'assets/vendor/inter-var.woff2', 'assets/vendor/jetbrains-mono-var.woff2')) {
+        if ($page.text -notmatch [regex]::Escape($asset)) {
+            throw "FAIL: the page no longer references $asset, so the vendored asset is dead weight"
+        }
+    }
+    if ($page.text -notmatch 'lucide\.icons') {
+        throw 'FAIL: the page does not read window.lucide.icons, so it has no icon source'
+    }
+    if ($page.text -notmatch 'prefers-reduced-motion') {
+        throw 'FAIL: the page never checks prefers-reduced-motion, so its animations ignore the OS setting'
+    }
+    if ($page.text -notmatch '@font-face') {
+        throw 'FAIL: the page declares no @font-face, so the vendored fonts are never loaded'
+    }
+    if ($page.text -notmatch 'Motion\.animate|window\.Motion') {
+        throw 'FAIL: the page never calls the animation library it loads'
     }
     # The option bar is a real ARIA tablist, not two buttons that happen to sit
     # together: a screen reader has to be told which view is selected.
@@ -330,6 +400,15 @@ try {
     if ($page.text -notmatch ':focus-visible') {
         throw 'FAIL: the page has no :focus-visible ring, so it is unusable without a mouse'
     }
+    # The sidebar card is the only place outside the hero that repeats which
+    # directory every change acts on; it starts on a placeholder, so something has
+    # to fill it in or it reads 读取中… forever (which is exactly what happened).
+    if ($page.text -notmatch 'id="src-v"' -or $page.text -notmatch 'id="src-n"' -or $page.text -notmatch 'id="btn-copy-src"') {
+        throw 'FAIL: the sidebar source card lost its elements (src-v / src-n / btn-copy-src)'
+    }
+    if ($page.text -notmatch 'function renderSourceCard' -or $page.text -notmatch 'renderSourceCard\(data\)') {
+        throw 'FAIL: renderSourceCard is not called on the status snapshot, so the sidebar source card stays on its placeholder'
+    }
 
     # -- no token, no API -----------------------------------------------------
     foreach ($m in @(
@@ -365,6 +444,57 @@ try {
     $unknown = Invoke-Api -Method 'GET' -Path 'api/nope' -Token $Token
     if ($unknown.code -ne 404) {
         throw "FAIL: an unknown /api/ path returned HTTP $($unknown.code) (expected 404)"
+    }
+
+    # -- the vendored assets -------------------------------------------------
+    # The fonts, the icon library and the animation library are the only files
+    # the server hands out from disk, and only by these exact names: the route
+    # is a whitelist, so a name that is not in it must 404 rather than fall
+    # through to "read whatever was asked for".
+    $assetCases = @(
+        @{ p = 'assets/vendor/lucide.min.js';             ct = 'text/javascript' },
+        @{ p = 'assets/vendor/motion.min.js';             ct = 'text/javascript' },
+        @{ p = 'assets/vendor/inter-var.woff2';           ct = 'font/woff2' },
+        @{ p = 'assets/vendor/jetbrains-mono-var.woff2';  ct = 'font/woff2' }
+    )
+    foreach ($a in $assetCases) {
+        # No token on purpose: a font is not a secret, and the page asks for it
+        # before any JS can attach a header.
+        $r = Invoke-Raw -Path $a.p
+        if ($r.code -ne 200) { throw "FAIL: GET /$($a.p) returned HTTP $($r.code) (expected 200)" }
+        if ($r.type -notmatch [regex]::Escape($a.ct)) { throw "FAIL: /$($a.p) was served as '$($r.type)'" }
+        if ($r.length -lt 1024) {
+            throw "FAIL: /$($a.p) is only $($r.length) bytes - a truncated or placeholder file"
+        }
+        # no-store, not immutable: the point of these files is that a newer
+        # version can be dropped in, and a browser holding a year-old lucide
+        # would make that a silent no-op.
+        if ($r.cache -notmatch 'no-store') {
+            throw "FAIL: /$($a.p) is served with Cache-Control '$($r.cache)' (want no-store)"
+        }
+    }
+    $va = Invoke-Raw -Path 'assets/vendor/motion.min.js'
+    if (-not $va.text -or $va.text -notmatch 'Motion') {
+        throw 'FAIL: assets/vendor/motion.min.js is not the Motion One bundle'
+    }
+    $la = Invoke-Raw -Path 'assets/vendor/lucide.min.js'
+    if (-not $la.text -or $la.text -notmatch 'createIcons|icons') {
+        throw 'FAIL: assets/vendor/lucide.min.js is not the Lucide bundle'
+    }
+    foreach ($bad in @(
+        @{ p = 'assets/vendor/../web-ui.ps1';        why = 'a traversal out of assets/' },
+        @{ p = 'assets/../config.json';              why = 'a traversal to a config file' },
+        @{ p = 'assets/vendor/nope.js';              why = 'a file that is not installed' },
+        @{ p = 'assets/vendor/';                     why = 'a directory, not a file' }
+    )) {
+        $r = Invoke-Raw -Path $bad.p
+        if ($r.code -eq 200) {
+            throw "FAIL: /$($bad.p) was served ($why) - the whitelist let something through"
+        }
+    }
+    $assetPost = Invoke-Api -Method 'POST' -Path 'assets/vendor/lucide.min.js' -Body '{}'
+    if ($assetPost.code -ne 405) {
+        throw "FAIL: POST /assets/vendor/lucide.min.js returned HTTP $($assetPost.code) (expected 405)"
     }
 
     # -- the snapshot ---------------------------------------------------------

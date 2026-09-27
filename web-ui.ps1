@@ -5,6 +5,7 @@
 # driven) from a browser instead of reading sync-skills.log by hand:
 #
 #   GET  /              the dashboard (web-ui.html, token injected)
+#   GET  /assets/*      the vendored fonts / icon library / animation library
 #   GET  /api/status    one snapshot: source, every target, last run
 #   GET  /api/skills    every source skill: description, size, where it landed
 #   POST /api/sync      run sync-skills.ps1 and return its output
@@ -68,15 +69,31 @@ $script:Reasons = @{
 # refuses before the process has to buffer more.
 $MaxBodyBytes = 50331648   # 48 MB
 
+# The four files web-ui.html loads from /assets/. Exact names, exact MIME types:
+# a whitelist, not a directory listing, so there is nothing for a traversal
+# attempt to name. Serving them is deliberately NOT behind the token gate — they
+# are the same bytes for every visitor and hiding them breaks nothing except the
+# page itself, while the token's job is to stop other sites from acting on the
+# skills, which only the /api/ routes do.
+$script:StaticFiles = [ordered]@{
+    'assets/vendor/motion.min.js'             = 'text/javascript; charset=utf-8'
+    'assets/vendor/lucide.min.js'             = 'text/javascript; charset=utf-8'
+    'assets/vendor/inter-var.woff2'           = 'font/woff2'
+    'assets/vendor/jetbrains-mono-var.woff2'  = 'font/woff2'
+}
+
 function Send-Response {
     param(
         $Context,
         [int]$Code = 200,
         [string]$ContentType = 'text/plain; charset=utf-8',
         [string]$Body = '',
+        # Binary body (fonts). Kept separate from $Body so a font is never
+        # round-tripped through a string and back.
+        [byte[]]$Raw,
         [switch]$NoCache
     )
-    $bytes = [Text.Encoding]::UTF8.GetBytes($Body)
+    $bytes = if ($null -ne $Raw) { $Raw } else { [Text.Encoding]::UTF8.GetBytes($Body) }
     $reason = $script:Reasons[$Code]
     if (-not $reason) { $reason = 'OK' }
     $head = New-Object System.Text.StringBuilder
@@ -324,6 +341,36 @@ function Handle-Request {
         # restarted. The comment on Send-Response already covers why caching a
         # loopback-only page buys nothing.
         Send-Response -Context $req -ContentType 'text/html; charset=utf-8' -Body $script:Page -NoCache
+        return
+    }
+
+    # The fonts, the icon library and the animation library. Only names in the
+    # whitelist above can be answered, and the resolved path is re-checked to sit
+    # under the repo root before anything is read off disk.
+    if ($req.path -like '/assets/*') {
+        if ($req.method -ne 'GET') {
+            Send-Json -Context $req -Code 405 -Value @{ error = 'GET only' }
+            return
+        }
+        $rel = $req.path.TrimStart('/')
+        $full = Join-Path $Root ($rel -replace '/', '\')
+        $resolved = [IO.Path]::GetFullPath($full)
+        # An ordered dictionary has Contains, not ContainsKey: the hashtable
+        # spelling would throw (and answer 500) on every asset request.
+        if (-not $script:StaticFiles.Contains($rel) -or
+            $rel -notmatch '^[a-z0-9/._-]+$' -or
+            -not $resolved.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase)) {
+            Send-Json -Context $req -Code 404 -Value @{ error = "not found: $($req.path)" }
+            return
+        }
+        if (-not (Test-Path -LiteralPath $resolved)) {
+            Send-Json -Context $req -Code 404 -Value @{ error = "not installed: $rel" }
+            return
+        }
+        # no-store, not immutable: the point of these files is that they can be
+        # swapped for a newer version, and a browser holding a year-old copy of
+        # lucide would make that a silent no-op.
+        Send-Response -Context $req -ContentType $script:StaticFiles[$rel] -Raw ([IO.File]::ReadAllBytes($resolved)) -NoCache
         return
     }
 

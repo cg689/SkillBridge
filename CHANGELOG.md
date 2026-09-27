@@ -8,6 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The dashboard page is now built on real libraries**, downloaded once from
+  their official channels and committed read-only under `assets/vendor/`, so the
+  page still works with no network, no CDN and no build step: **Lucide 0.469.0**
+  (icons, ISC) and **Motion One 10.18.0** (animation, MIT) as UMD bundles, plus
+  the variable cuts of **Inter** and **JetBrains Mono** (`@fontsource`,
+  OFL-1.1, latin subset) for the type — the CJK glyphs stay with the system font
+  stack, because shipping a multi-megabyte Chinese face for one local page is not
+  worth it. `web-ui.ps1` serves them from `/assets/` through a whitelist table of
+  exactly four file names: GET only (405 otherwise); a name that is not on the
+  list, a traversal, `config.json`, a path that does not resolve and a directory
+  are all 404; every answer is `no-store`. If a file is missing the page
+  degrades quietly instead of half-rendering.
+- The rebuilt page around them: a **sidebar** (brand, the two views with the
+  skill count, the source directory this page acts on with its count and a copy
+  button, 停止服务) beside one content column; a real **skills table** (name /
+  Chinese intro / coverage / size / last change, sortable, a group header per
+  category); **toasts that stack** and dismiss on their own instead of
+  overwriting each other; a progress bar under the top bar while a request runs.
+  Motion One drives every enter and exit — the static CSS is always the final
+  state, so a page that never runs its animations still ends up in the right
+  place — and `prefers-reduced-motion` short-circuits all of it.
+  `assets/README.md` records where each file came from, its license, and how to
+  move it to a new version.
+- `scanjs.py`: a small static guard that pulls the page's inline `<script>` out,
+  runs `node --check` on it, and cross-checks every called identifier against the
+  names the script declares (plus a browser-globals allowlist). It exists because
+  the page is ES5 with no build step and no import list, so a function called in
+  eight places and defined in none of them is otherwise invisible until somebody
+  clicks it.
 - **Skills can be managed from the dashboard, and it acts on `config.json`'s
   `source`** — the same folder CC Switch itself keeps its skills in.
   `POST /api/skills/delete` (`Remove-SkillBridgeSkill` in `common.psm1`) removes
@@ -56,8 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   client-side cap, chunked base64 so a large package does not build a quadratic
   string), a result list that reports what the upload added / skipped / refused,
   and the destructive delete dialog that names the path, the file count and the
-  three consequences the page cannot otherwise show. Everything is still
-  inlined — no CDN, no build step, nothing fetched but the page's own API.
+  three consequences the page cannot otherwise show.
 - `tests/smoke-webui.ps1` now drives both new endpoints end to end over HTTP
   against a throwaway source and asserts what is on disk afterwards: a valid
   package (SKILL.md plus a nested folder), the same package again (skipped, and
@@ -196,6 +224,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the file itself.
 
 ### Fixed
+- **Every `/assets/` request answered 500.** `$script:StaticFiles` is an
+  `[ordered]@{}`, i.e. an `OrderedDictionary`, which has `Contains` — not
+  `ContainsKey` (that is the hashtable spelling). The call threw on the first
+  asset request and the accept loop answered 500 for it.
+- **`motionThen` was called in eight places and defined in none.** A leftover
+  from the staged rewrite: every dialog open threw before it could show, and the
+  close path of an expanded row threw after flipping its state, so rows never
+  closed.
+- The sidebar's 源目录 card sat on its placeholder (读取中…) forever: nothing
+  wrote to it. It now shows the resolved directory with the skill count next to
+  the label and disables 复制路径 when there is nothing to copy.
+- The **添加技能** dialog's primary button simply greyed out after a result,
+  which is a poor way out of a dialog whose only remaining job is to be read — it
+  becomes 关闭 now. (The result list is the only place that reports a skipped
+  duplicate or a refused entry, so the dialog stays open on purpose.)
+- The delete confirmation named only the skill, not the folder. It now shows the
+  **absolute path** the deletion is about to touch, because that folder is what
+  every tool on the machine reads and there is no undo.
+- `tests/smoke-webui.ps1`'s asset and traversal assertions were partly vacuous:
+  they went through `HttpWebRequest`, whose `Uri` class compacts `..` out of a
+  path client-side, so they were testing the client, not the server. They go over
+  a raw `TcpClient` now — which is also what turned up the 500 above. Two static
+  guards were stale after the redesign: one keyed on markup the page no longer
+  has (the category chips are rendered by JavaScript, so the guard reads the
+  JavaScript literal and asserts that something writes the chips), and one keyed
+  on a theme token that does not exist (the page uses `--surface`, not `--card`).
 - Clicking one target card expanded the cards next to it. The target grid is a
   CSS grid, and grid items stretch to the tallest item in their row by default,
   so opening a card with a long detail ballooned the three collapsed cards
