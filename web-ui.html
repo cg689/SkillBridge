@@ -156,7 +156,11 @@
   .stat.fail .value { color: var(--fail); }
 
   /* ------------------------------------------------------------- targets */
-  .targets { display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 12px; }
+  /* align-items: start on purpose: the default `stretch` makes every card in a
+     row match the tallest one, so opening a card with a long detail ballooned
+     the three collapsed cards next to it to the same height — it looked like
+     one click had expanded the whole row. */
+  .targets { display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 12px; align-items: start; }
   .target {
     padding: 14px 15px 13px; cursor: pointer; position: relative;
     transition: border-color .15s, transform .12s, background .15s;

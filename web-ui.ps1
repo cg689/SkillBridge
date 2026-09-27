@@ -258,7 +258,11 @@ function Invoke-DbCheck {
 function Handle-Request {
     param($req)
     if ($req.path -eq '/') {
-        Send-Response -Context $req -ContentType 'text/html; charset=utf-8' -Body $script:Page
+        # -NoCache: the HTML is inlined into the process at startup, so a browser
+        # that keeps a copy shows the previous build after the server is
+        # restarted. The comment on Send-Response already covers why caching a
+        # loopback-only page buys nothing.
+        Send-Response -Context $req -ContentType 'text/html; charset=utf-8' -Body $script:Page -NoCache
         return
     }
 

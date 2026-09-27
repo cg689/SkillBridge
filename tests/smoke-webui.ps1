@@ -5,7 +5,8 @@
 # endpoint exactly the way web-ui.html does, asserting:
 #
 #   * / serves the page with the per-start token already substituted in
-#     (no __SB_TOKEN__ placeholder survives)
+#     (no __SB_TOKEN__ placeholder survives), is not cacheable, and keeps
+#     `align-items: start` on the target-card grid
 #   * every /api/ call WITHOUT that token is refused with 403 — that gate is the
 #     whole CSRF defence, so it must not depend on which method or path is used
 #   * GET /api/sync and GET /api/db-check are 405: both run something
@@ -203,6 +204,32 @@ try {
         throw "FAIL: the page carries no per-start token, so the CSRF test below would be vacuous"
     }
     $Token = $Matches[1]
+
+    # -- the page must not be cacheable, and its card grid must not stretch ----
+    # The page is read into the server process ONCE at startup, so a copy the
+    # browser keeps shows the previous build after a restart: `no-store` is what
+    # makes an edited web-ui.html visible on the next plain reload.
+    $raw = [System.Net.HttpWebRequest]::Create("http://localhost:$script:Port/")
+    $raw.Method = 'GET'
+    $raw.KeepAlive = $false
+    $raw.Timeout = 20000
+    try {
+        $res = $raw.GetResponse()
+        $cache = [string]$res.Headers['Cache-Control']
+        $res.Close()
+    } catch [System.Net.WebException] {
+        throw "FAIL: could not read the page's headers: $($_.Exception.Message)"
+    }
+    if ($cache -notmatch 'no-store') {
+        throw "FAIL: the page is served with Cache-Control '$cache' (want no-store), so a restarted server leaves the browser on the previous build"
+    }
+    # Grid items stretch to the tallest card in their row by default, so opening
+    # one card ballooned the collapsed ones beside it — it looked like one click
+    # had expanded the whole row. This declaration is the only thing that stops
+    # that, and nothing else in the page can assert a layout.
+    if ($page.text -notmatch '\.targets\s*\{[^}]*align-items:\s*start') {
+        throw 'FAIL: .targets no longer sets align-items: start, so an expanded card stretches every card in its row again'
+    }
 
     # -- no token, no API -----------------------------------------------------
     foreach ($m in @(

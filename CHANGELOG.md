@@ -121,6 +121,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the file itself.
 
 ### Fixed
+- Clicking one target card expanded the cards next to it. The target grid is a
+  CSS grid, and grid items stretch to the tallest item in their row by default,
+  so opening a card with a long detail ballooned the three collapsed cards
+  beside it to the same height (measured here: 141px → 317px) — it read as one
+  click expanding the whole row. `.targets` sets `align-items: start` now, so
+  only the clicked card grows; several cards can still be open at once, which is
+  what keeping the open state outside the render is for.
+  `tests/smoke-webui.ps1` asserts the declaration is still in the served page,
+  because no API-level test can see a layout.
+- The dashboard's page could go stale in the browser after a restart. The HTML
+  is read into the server process once at startup and `/` carried no
+  `Cache-Control`, so a tab holding the previous build kept showing it — which
+  is what hid the fix above until a hard reload. The page is `no-store` now, and
+  the smoke suite reads the header to keep it that way.
 - **Front-end interaction bugs in the dashboard.** `renderTargets()` rebuilds
   the whole grid on every snapshot, so an expanded card collapsed 15 seconds
   later (and after every sync) — the open state now lives outside the render
