@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="sb-token" content="__SB_TOKEN__">
-<title>SkillBridge · CC Switch 技能同步</title>
+<link rel="icon" href="data:,">
+<title>SkillBridge · CC Switch 技能同步控制台</title>
 <style>
   :root {
     --bg:        #0b0d12;
@@ -90,6 +91,10 @@
   }
   .btn.primary:hover { background: linear-gradient(180deg, rgba(79,209,197,.30), rgba(79,209,197,.16)); color: #dffbf7; }
   .btn.danger:hover { border-color: rgba(251,113,133,.5); color: var(--fail); }
+  /* Second-click confirmation for 停止. A window.confirm() would also work, but
+     it blocks the page's JS thread while it is open - the poll stops, the
+     animations stop, everything waits for one click. */
+  .btn.armed { border-color: rgba(251,113,133,.65); color: var(--fail); background: rgba(251,113,133,.12); }
   .btn svg { flex: none; }
   .btn .spin { display: none; }
   .btn.busy .spin { display: block; animation: rot .9s linear infinite; }
@@ -307,7 +312,7 @@
   <div class="topbar-spacer"></div>
   <button class="btn" id="btn-refresh" title="重新读取状态"><svg class="icon" width="15" height="15" viewBox="0 0 24 24"><use href="#i-refresh"/></svg><svg class="spin" width="15" height="15" viewBox="0 0 24 24"><use href="#i-spin"/></svg>刷新</button>
   <button class="btn primary" id="btn-sync" title="立即执行一次同步"><svg class="icon" width="15" height="15" viewBox="0 0 24 24"><use href="#i-sync"/></svg><svg class="spin" width="15" height="15" viewBox="0 0 24 24"><use href="#i-spin"/></svg>立即同步</button>
-  <button class="btn danger" id="btn-stop" title="停止本服务并关闭"><svg width="15" height="15" viewBox="0 0 24 24"><use href="#i-power"/></svg>停止</button>
+  <button class="btn danger" id="btn-stop" title="停止本服务并关闭（需按两次确认）"><svg width="15" height="15" viewBox="0 0 24 24"><use href="#i-power"/></svg><span id="btn-stop-label">停止</span></button>
 </header>
 
 <main>
@@ -369,7 +374,11 @@
   'use strict';
   var TOKEN = (document.querySelector('meta[name="sb-token"]') || {}).content || '';
   var $ = function (id) { return document.getElementById(id); };
-  var state = { snapshot: null, logTotal: 0 };
+  var state = { snapshot: null, logTotal: 0, stopped: false, syncing: false };
+  // Which cards the user expanded by hand. renderTargets() rebuilds the DOM on
+  // every snapshot, so the open state has to live outside it — otherwise the
+  // 15s poll and every finished sync collapse whatever was being read.
+  var openCards = {};
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -392,21 +401,36 @@
     var headers = { 'X-SB-Token': TOKEN };
     var body = undefined;
     if (opts.method === 'POST' || opts.method === 'PUT') {
-      // Always send a body: HttpListener (HTTP.sys) answers 411 to a POST that
-      // carries neither a Content-Length nor chunked encoding.
+      // Always send a body: HTTP.sys answers 411 to a POST that carries
+      // neither a Content-Length nor chunked encoding.
       body = JSON.stringify(opts.body === undefined ? {} : opts.body);
       headers['Content-Type'] = 'application/json';
     }
-    return fetch(path, {
-      method: opts.method || 'GET',
-      headers: headers,
-      body: body
-    }).then(function (res) {
+    // The server handles one request at a time, so a request can legitimately
+    // sit behind a sync for minutes. Without a deadline, though, a server that
+    // died mid-sync would leave the button spinning forever — 10 minutes is
+    // far beyond any real sync and still ends the wait.
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 600000);
+    function handle(res) {
       if (res.status === 403) throw new Error('令牌校验失败：本页面的服务端可能已重启，请重新打开页面。');
       return res.json().catch(function () { return {}; }).then(function (data) {
         if (!res.ok && data && data.error) throw new Error(data.error);
         return data;
       });
+    }
+    return fetch(path, {
+      method: opts.method || 'GET',
+      headers: headers,
+      body: body,
+      signal: ctrl ? ctrl.signal : undefined
+    }).then(handle, function (err) {
+      if (err && err.name === 'AbortError') {
+        throw new Error('请求超时（10 分钟）。服务端同一时刻只处理一个请求，可能还在跑上一次同步；稍等一下再刷新。');
+      }
+      throw err;
+    }).then(function (data) { clearTimeout(timer); return data; }, function (e) {
+      clearTimeout(timer); throw e;
     });
   }
 
@@ -468,10 +492,14 @@
 
   function renderStats(s) {
     var t = s.totals || {};
+    var linkTargets = (s.targets || []).filter(function (x) { return x.mode !== 'copy'; }).length;
+    var copyTargets  = (s.targets || []).filter(function (x) { return x.mode === 'copy'; }).length;
     var html = '';
     html += statCard('源技能', num(s.skill_count), 'CC Switch skills 目录');
-    html += statCard('已链接', num(t.linked || 0), (t.targets - 1) + ' 个联接目标 × ' + s.skill_count, t.linked ? '' : 'warn');
-    html += statCard('已复制', num(t.copied || 0), t.stale ? num(t.stale) + ' 个内容已过期' : 'copy 模式目标', t.stale ? 'warn' : '');
+    html += statCard('已链接', num(t.linked || 0), linkTargets + ' 个联接目标 × ' + s.skill_count + ' 个技能', t.linked ? '' : 'warn');
+    html += statCard('已复制', num(t.copied || 0), copyTargets
+      ? (t.stale ? num(t.stale) + ' 个内容已过期' : 'copy 模式目标（' + copyTargets + '）')
+      : '未配置 copy 模式目标', t.stale ? 'warn' : '');
     html += statCard('待同步', num(t.missing || 0), t.missing ? '运行同步即可补齐' : '无遗漏', t.missing ? 'warn' : 'ok');
     html += statCard('需注意', num(t.issues || 0), t.dead ? num(t.dead) + ' 个失效链接' : '死链 / 残留 / 冲突', t.issues ? 'warn' : 'ok');
     html += statCard('工具自有', num(t.foreign || 0), '不被同步改动', 'ok');
@@ -498,6 +526,7 @@
       return;
     }
     wrap.innerHTML = s.targets.map(function (t, i) {
+      var key = t.name || ('#' + i);
       var done = t.linked + t.copied;
       var pct = total ? Math.round(done / total * 100) : 0;
       var missing = t.missing || [], orphans = t.orphans || [], dead = t.dead || [],
@@ -525,9 +554,10 @@
           issues.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
       }
 
-      return '<div class="card target' + (issues.length ? ' has-issues' : '') + (!t.exists ? ' missing-dir' : '') + '" data-i="' + i + '">' +
+      return '<div class="card target' + (issues.length ? ' has-issues' : '') + (!t.exists ? ' missing-dir' : '') +
+               (openCards[key] ? ' open' : '') + '" data-i="' + i + '" data-name="' + esc(key) + '">' +
         '<div class="target-head"><span class="target-name">' + esc(t.name) + '</span>' +
-        '<span class="badge ' + t.mode + '">' + esc(t.mode) + '</span></div>' +
+        '<span class="badge ' + esc(t.mode) + '">' + esc(t.mode) + '</span></div>' +
         '<div class="target-path">' + esc(t.resolved_path || t.path || '') + '</div>' +
         '<div class="bar' + (pct < 100 ? ' partial' : '') + '"><i style="width:' + pct + '%"></i></div>' +
         '<div class="target-foot"><span class="target-count"><b>' + num(done) + '</b> / ' + num(total) + '</span>' +
@@ -537,7 +567,14 @@
     }).join('');
 
     Array.prototype.forEach.call(wrap.querySelectorAll('.target'), function (el) {
-      el.addEventListener('click', function () { el.classList.toggle('open'); });
+      el.addEventListener('click', function (e) {
+        // A click on a chip or an issue line inside the detail is reading, not
+        // "collapse this card".
+        if (e.target && e.target.closest && e.target.closest('.detail')) return;
+        var open = !el.classList.contains('open');
+        el.classList.toggle('open', open);
+        openCards[el.getAttribute('data-name')] = open;
+      });
     });
   }
 
@@ -549,13 +586,17 @@
   }
 
   function renderLog(data) {
-    if (!data || !data.exists) { $('log-out').textContent = '还没有 sync-skills.log。'; $('log-sub').textContent = ''; return; }
+    var el = $('log-out');
+    if (!data || !data.exists) { el.textContent = '还没有 sync-skills.log。'; $('log-sub').textContent = ''; return; }
     state.logTotal = data.total;
     $('log-sub').textContent = data.total + ' 行 · 显示最后 ' + (data.lines || []).length + ' 行';
-    $('log-out').innerHTML = (data.lines || []).map(function (l) {
+    // Auto-refresh must not yank the panel back to the bottom while the user is
+    // reading earlier lines.
+    var stick = (el.scrollHeight - el.scrollTop - el.clientHeight) < 48;
+    el.innerHTML = (data.lines || []).map(function (l) {
       return '<span class="' + classifyLogLine(l) + '">' + esc(l) + '</span>';
     }).join('\n');
-    $('log-out').scrollTop = $('log-out').scrollHeight;
+    if (stick) el.scrollTop = el.scrollHeight;
   }
 
   function renderDbCheck(data) {
@@ -568,7 +609,18 @@
   }
 
   /* ------------------------------------------------------------ actions */
+  // Serialised. A snapshot costs ~1s and the 15s poll, the 刷新 button and a
+  // finished sync can all ask for one at the same moment; the server answers
+  // one request at a time, so without this they queue up and then fire in a
+  // burst (each one re-rendering the page behind the user's back).
+  var refreshChain = Promise.resolve();
   function refresh() {
+    refreshChain = refreshChain.then(doRefresh, doRefresh);
+    return refreshChain;
+  }
+
+  function doRefresh() {
+    if (state.stopped) return;
     progress(true);
     return api('/api/status').then(function (s) {
       state.snapshot = s;
@@ -582,12 +634,20 @@
       banner(b.join(''));
       return api('/api/log?lines=200').then(renderLog).catch(function () {});
     }).catch(function (e) {
-      banner('<div class="banner"><b>读取状态失败：</b> ' + esc(e.message) + '<br>如果刚刚点击了「停止」，请直接关闭此窗口。</div>');
-      $('hero-state-text').textContent = '无法连接到服务';
+      if (state.stopped) {
+        banner('<div class="banner info">服务已停止，可以关闭这个标签页和命令行窗口了。</div>');
+      } else {
+        banner('<div class="banner"><b>读取状态失败：</b> ' + esc(e.message) + '<br>如果刚刚点击了「停止」，请直接关闭此窗口。</div>');
+        $('hero-state-text').textContent = '无法连接到服务';
+      }
     }).then(function () { progress(false); });
   }
 
   function runSync() {
+    // The keydown shortcut used to bypass the button's disabled state, and a
+    // second sync while one is running only queues behind it.
+    if (state.syncing || state.stopped) return;
+    state.syncing = true;
     var btn = $('btn-sync');
     busy(btn, true);
     progress(true);
@@ -599,10 +659,11 @@
       return refresh();
     }).catch(function (e) {
       toast('fail', '无法执行同步', e.message);
-    }).then(function () { busy(btn, false); progress(false); });
+    }).then(function () { busy(btn, false); progress(false); state.syncing = false; });
   }
 
   function runDbCheck() {
+    if (state.stopped) return;
     var btn = $('btn-db');
     busy(btn, true);
     return api('/api/db-check', { method: 'POST' }).then(function (r) {
@@ -620,7 +681,34 @@
     api('/api/log?lines=200').then(renderLog).catch(function (e) { toast('fail', '读取日志失败', e.message); })
       .then(function () { busy(b, false); });
   });
+  // 停止 needs two clicks: it sits one button away from 立即同步, and a stray
+  // click should not kill the server. (window.confirm() would do this too, but
+  // it blocks the page's JS thread while it is open.)
+  var stopArmed = false, stopTimer = null;
+  function disarmStop() {
+    if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
+    stopArmed = false;
+    var b = $('btn-stop');
+    b.classList.remove('armed');
+    $('btn-stop-label').textContent = '停止';
+    b.title = '停止本服务并关闭（需按两次确认）';
+  }
   $('btn-stop').addEventListener('click', function () {
+    if (state.stopped) return;
+    if (!stopArmed) {
+      stopArmed = true;
+      this.classList.add('armed');
+      $('btn-stop-label').textContent = '确认停止？';
+      this.title = '再点一次确认停止；5 秒内不点会自动取消';
+      stopTimer = setTimeout(disarmStop, 5000);
+      return;
+    }
+    disarmStop();
+    state.stopped = true;
+    // Stop the 15s poll: it would keep hammering a dead server and overwrite
+    // the message below with a connection error every 15 seconds.
+    if (timer) { clearInterval(timer); timer = null; }
+    $('auto-refresh').checked = false;
     api('/api/stop', { method: 'POST' }).catch(function () {}).then(function () {
       banner('<div class="banner info">服务已停止，可以关闭这个标签页和命令行窗口了。</div>');
       toast('ok', '服务已停止');
@@ -630,13 +718,23 @@
   var timer = null;
   $('auto-refresh').addEventListener('change', function () {
     if (timer) { clearInterval(timer); timer = null; }
-    if (this.checked) { timer = setInterval(refresh, 15000); }
+    if (this.checked) {
+      timer = setInterval(function () {
+        // A hidden tab is the worst case for this poll: nobody is looking, and
+        // every snapshot re-walks and re-hashes every skill in every target.
+        if (document.hidden || state.stopped) return;
+        refresh();
+      }, 15000);
+    }
   });
 
   document.addEventListener('keydown', function (e) {
-    if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
-    if (e.key === 'r' || e.key === 'R') { refresh(); }
-    if (e.key === 's' || e.key === 'S') { runSync(); }
+    // Modifier combos belong to the browser: Ctrl+S is "save this page", and it
+    // used to also fire a sync here. A stray 's' is one keystroke away from
+    // writing to all 20+ targets, so the shortcut is refresh-only now.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    if (e.key === 'r' || e.key === 'R') { e.preventDefault(); refresh(); }
   });
 
   refresh();

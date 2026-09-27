@@ -100,6 +100,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the file itself.
 
 ### Fixed
+- **Front-end interaction bugs in the dashboard.** `renderTargets()` rebuilds
+  the whole grid on every snapshot, so an expanded card collapsed 15 seconds
+  later (and after every sync) — the open state now lives outside the render
+  and is restored by target name. Clicking a chip or an issue line inside an
+  expanded card collapsed it; a click inside `.detail` is now reading, not
+  toggling. The log panel was yanked back to the bottom on every auto-refresh,
+  so reading earlier lines was impossible; it now sticks to the bottom only when
+  it already was. The `s` shortcut started a full sync from one keystroke and
+  ignored modifiers, so **Ctrl+S** ("save this page") fired a sync too — refresh
+  is the only shortcut left, and it ignores Ctrl/Meta/Alt. A second sync could
+  also be started through the shortcut while one was already running. After 停止
+  the 15s poll kept hammering the dead server and replaced the "服务已停止"
+  message with a connection error every 15 seconds; it stops now. 停止 sat one
+  misclick away from 立即同步, and the `window.confirm()` guard froze the page's
+  JS thread while it was open — it is a two-click button instead ("停止" →
+  "确认停止？", 5s timeout). A request had no deadline, so a server that died
+  mid-sync left the button spinning forever; there is now a 10-minute abort whose
+  message explains that the server answers one request at a time. A hidden tab
+  no longer polls, and refreshes are serialised instead of queueing up behind a
+  running sync and firing in a burst.
+- The dashboard reported "N-1 联接目标" by subtracting one from the total target
+  count, which is only right while exactly one copy-mode target exists; it now
+  counts the modes it actually renders.
 - Dead-link pruning deleted links it did not own. Every other deletion path
   already required the link to point *into the source*; pruning only required
   the link to be dead, so a junction or symlink whose target had simply gone
