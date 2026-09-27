@@ -114,7 +114,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\web-ui.ps1 -Port 9001 -NoB
 
 两者就是两个普通 POST（`/api/skills/add`、`/api/skills/delete`），和其他接口一样要带本次启动的 token。`tests/smoke-webui.ps1` 会拿一个一次性的源目录把两条接口都真的跑一遍——合法压缩包、同名、会跳出的条目、不是 zip、超大请求体、非法名字、不存在的技能、没有 `SKILL.md` 的文件夹——然后去看磁盘上到底剩什么。
 
-页面本身则按 shadcn 的**语义化颜色令牌**（`--background`、`--foreground`、`--muted-foreground`、`--destructive`，外加一套圆角刻度）重写了一遍，所以浅色和深色是同一份样式表的两套取值，而不是两份设计——侧栏那个按钮切换，选过的主题会记住（第一次打开则跟随系统）。它靠四个真库搭起来，都只下载一次、只读地放进仓库的 `assets/vendor/`：**Lucide** 0.469.0（图标）、**Motion One** 10.18.0（动效）以及 Inter 与 JetBrains Mono 的**可变字体**（字体）——所以运行期没有 CDN、没有构建步骤、也不联网：`web-ui.ps1` 用一张只列了这四个文件名的白名单表把 `/assets/` 提供出来，万一少一个页面也只是安静地退化。动效由 Motion One 驱动，静态 CSS 就是最终状态，`prefers-reduced-motion` 下一切安静。此外还有：一个真正的 ARIA 选项卡栏（`role="tab"`、`aria-selected`、roving `tabindex`、←/→/Home/End）；两个弹窗都是 `role="dialog"` + `aria-modal="true"`，背后的页面 `inert`，Tab 出不去，Esc 取消并把焦点还给打开它的那个按钮；每个控件都有可见的 `:focus-visible` 焦点环；`/` 直接聚焦搜索框；技能列表加载期间显示骨架而不是一片空白。
+页面本身则按 shadcn 的**语义化颜色令牌**（`--background`、`--foreground`、`--muted-foreground`、`--primary`，外加一套圆角刻度）重写了一遍，所以浅色和深色是同一份样式表的两套取值，而不是两份设计——侧栏那个按钮切换，选过的主题会记住（第一次打开则跟随系统）。它靠四个真库搭起来，都只下载一次、只读地放进仓库的 `assets/vendor/`：**Lucide** 0.469.0（图标）、**Motion One** 10.18.0（动效）以及 Inter 与 JetBrains Mono 的**可变字体**（字体）——所以运行期没有 CDN、没有构建步骤、也不联网：`web-ui.ps1` 用一张只列了这四个文件名的白名单表把 `/assets/` 提供出来，万一少一个页面也只是安静地退化。动效由 Motion One 驱动，静态 CSS 就是最终状态，`prefers-reduced-motion` 下一切安静。此外还有：一个真正的 ARIA 选项卡栏（`role="tab"`、`aria-selected`、roving `tabindex`、←/→/Home/End）；两个弹窗都是 `role="dialog"` + `aria-modal="true"`，背后的页面 `inert`，Tab 出不去，Esc 取消并把焦点还给打开它的那个按钮；每个控件都有可见的 `:focus-visible` 焦点环；`/` 直接聚焦搜索框；技能列表加载期间显示骨架而不是一片空白。
 
 两个值得知道的设计点：
 

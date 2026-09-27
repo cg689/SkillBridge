@@ -53,7 +53,6 @@
     --text-3:        #6d7789;
     --brand:         #2dd4bf;
     --brand-hi:      #5eead4;
-    --brand-on:      #04231f;
     --brand-text:    #7ff0e3;
     --brand-soft:    rgba(45, 212, 191, .12);
     --brand-soft-2:  rgba(45, 212, 191, .22);
@@ -71,23 +70,16 @@
     --shadow-3: 0 32px 64px -24px rgba(0, 0, 0, .78), 0 2px 8px rgba(0, 0, 0, .4);
     --r: 10px; --r-sm: 7px; --r-lg: 14px; --r-pill: 999px;
 
-    /* The shadcn names, as aliases. Two spellings of every colour would be a
-       trap, so the rest of the sheet only ever asks for these. */
+    /* The shadcn names, as aliases of the ones above. Anything the stylesheet
+       really asks for lives in the darker palette; these exist so a reader who
+       knows shadcn recognises the file, not as a second set of values. */
     --background: var(--bg);
     --foreground: var(--text);
     --muted: var(--surface-2);
     --muted-foreground: var(--text-3);
-    --secondary: var(--surface-2);
-    --secondary-foreground: var(--text-2);
-    --border: var(--line);
-    --input: var(--line-2);
     --ring: rgba(45, 212, 191, .50);
     --primary: var(--brand);
-    --primary-foreground: var(--brand-on);
     --primary-text: var(--brand-text);
-    --destructive: var(--danger);
-    --destructive-text: var(--danger-text);
-    --destructive-foreground: #ffffff;
 
     --font-sans: 'Inter var', Inter, 'PingFang SC', 'HarmonyOS Sans SC', 'Hiragino Sans GB',
                  'Microsoft YaHei', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
@@ -111,7 +103,6 @@
     --text-3:        #8b95a6;
     --brand:         #0f766e;
     --brand-hi:      #0d9488;
-    --brand-on:      #ffffff;
     --brand-text:    #0f766e;
     --brand-soft:    rgba(15, 118, 110, .07);
     --brand-soft-2:  rgba(15, 118, 110, .15);
@@ -166,10 +157,6 @@
   .muted { color: var(--muted-foreground); }
   .grow { flex: 1 1 auto; min-width: 0; }
   .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sr-only {
-    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
-  }
   /* A theme swap is a colour change everywhere at once; without this the
      surfaces snap while the text fades. On for 340 ms, around the switch. */
   .theme-anim, .theme-anim *, .theme-anim *::before, .theme-anim *::after {
@@ -424,18 +411,12 @@
     color: var(--text-3); font-weight: 650;
   }
   .detail h4 .n { color: var(--text-2); }
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 11px; }
-  .chips:last-child { margin-bottom: 0; }
   .chip {
     font-family: var(--font-mono); font-size: 10.8px; padding: 1.5px 6px; border-radius: 5px;
     background: var(--surface-2); border: 1px solid var(--line); color: var(--text-2);
   }
   .chip.more { color: var(--text-3); font-style: italic; font-family: var(--font-sans); }
   .chip.hot { color: var(--danger-text); border-color: var(--danger-line); background: var(--danger-soft); }
-  .chip.k-link { color: var(--brand-text); border-color: var(--brand-line); background: var(--brand-soft); }
-  .chip.k-copy { color: var(--info-text); border-color: var(--info-line); background: var(--info-soft); }
-  /* Dashed = what is on disk disagrees with what config.json asks for. */
-  .chip.k-drift { border-style: dashed; border-color: var(--warn-line); color: var(--warn-text); }
   .detail ul.issues { margin: 0; padding-left: 17px; color: var(--text-2); font-size: 12.3px; }
   .detail ul.issues li { margin-bottom: 3px; }
   .detail-empty { color: var(--text-3); font-size: 12.3px; }
@@ -826,7 +807,7 @@
 
     <div class="sidebar-foot">
       <div class="src-card">
-        <div class="k" id="src-k">源目录<span class="k-n" id="src-n"></span></div>
+        <div class="k">源目录<span class="k-n" id="src-n"></span></div>
         <div class="v" id="src-v">读取中…</div>
         <div class="row">
           <button type="button" class="btn sm ghost" id="btn-copy-src" title="复制源目录路径">复制路径</button>
@@ -883,7 +864,7 @@
             <div class="panel-head">
               <span class="panel-ic" id="panel-ic-db"></span>
               <h3>数据库一致性</h3>
-              <span class="sub" id="db-sub">CC Switch 的 skills 表 vs 技能文件夹</span>
+              <span class="sub">CC Switch 的 skills 表 vs 技能文件夹</span>
             </div>
             <pre class="out" id="db-out">尚未检查。点击上方「检查数据库」开始。</pre>
             <div class="panel-foot"><span class="sub" id="db-note"></span></div>
@@ -990,7 +971,7 @@
     <div class="dialog-head">
       <div>
         <h2 id="add-title">添加技能</h2>
-        <div class="sub" id="add-sub"></div>
+        <div class="sub"></div>
       </div>
       <button type="button" class="dialog-close" id="add-close" title="取消（Esc）" aria-label="取消添加"></button>
     </div>
@@ -1045,12 +1026,6 @@
   function num(n) {
     if (n == null || isNaN(n)) return '—';
     return Number(n).toLocaleString('zh-CN');
-  }
-  function size(b) {
-    b = Number(b) || 0;
-    if (b < 1024) return b + ' B';
-    if (b < 1048576) return (b / 1024).toFixed(b < 10240 ? 1 : 0) + ' KB';
-    return (b / 1048576).toFixed(b < 10485760 ? 1 : 0) + ' MB';
   }
   function ago(iso) {
     if (!iso) return '';
@@ -1462,13 +1437,6 @@
     $('hero-kv').innerHTML = kv.map(function (r) {
       return '<div class="kv"><dt class="k">' + esc(r[0]) + '</dt><dd class="v' + (r[2] ? ' mono' : '') + '">' + esc(r[1]) + '</dd></div>';
     }).join('');
-  }
-
-  function statCard(label, value, note, cls, ic) {
-    return '<section class="card stat ' + (cls || '') + '"><div class="stat-top">' + icon(ic, 14) +
-      '<span class="stat-label">' + esc(label) + '</span></div>' +
-      '<div class="stat-value num">' + num(value) + '</div>' +
-      '<div class="stat-note">' + esc(note || '') + '</div></section>';
   }
 
   function renderStats(s) {

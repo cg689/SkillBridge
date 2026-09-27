@@ -373,12 +373,14 @@ try {
     }
     # One token set, two themes: everything else in the stylesheet asks for a
     # semantic name, which is the only way the light theme is a different
-    # palette instead of a second page.
+    # palette instead of a second page. The two asserted here are the ones the
+    # page actually consumes - an alias nothing asks for is dead weight and the
+    # shadcn names have already lost a couple that way.
     if ($page.text -notmatch 'html\[data-theme="light"\]') {
         throw 'FAIL: the page has no light theme block, so the theme button has nothing to switch to'
     }
-    if ($page.text -notmatch '--destructive\s*:' -or $page.text -notmatch '--muted-foreground\s*:') {
-        throw 'FAIL: the semantic token set (--destructive / --muted-foreground) is gone from the stylesheet'
+    if ($page.text -notmatch '--muted-foreground\s*:' -or $page.text -notmatch '--background\s*:') {
+        throw 'FAIL: the semantic token set (--muted-foreground / --background) is gone from the stylesheet'
     }
     # Deleting a skill is irreversible and touches CC Switch's own skills
     # directory, so it is a blocking modal that names the consequences - never a

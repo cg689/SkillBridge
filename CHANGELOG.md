@@ -185,7 +185,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: the Windows smoke suite also runs under Windows PowerShell 5.1 (the shell
   the .bat launchers and the scheduled task actually use), not just pwsh 7.
 
+### Removed
+- **Dead code in the dashboard page**, most of it left over from the rebuild:
+  `statCard()` (a helper `renderStats` stopped calling when it gained its own
+  markup), `size()` (a byte formatter that `skillSizeText` replaced), five CSS
+  families nothing asks for (`.chips`, `.chip.k-link`, `.chip.k-copy`,
+  `.chip.k-drift`, `.sr-only`), nine colour tokens with no consumer
+  (`--secondary`, `--secondary-foreground`, `--border`, `--input`,
+  `--primary-foreground`, `--destructive-text`, `--destructive-foreground`,
+  `--destructive`, and `--brand-on` once the alias that used it went), and three
+  `id` attributes that no stylesheet rule and no script reads. The comment over
+  the remaining shadcn aliases claimed the sheet only ever asked for those
+  names, which had stopped being true; it now says what they are.
+  `tests/smoke-webui.ps1`'s token guard asserts two tokens the page really
+  consumes instead of one of the removed aliases, and the README's list of
+  tokens matches the file.
+
 ### Changed
+- `scanjs.py` also checks every icon name the page asks for against the names
+  the vendored Lucide bundle actually exports — a misspelling renders an empty
+  box, which is the same class of bug the `#i-chevron` guard exists for — and
+  strips comments and string literals before looking for call sites, counts
+  function parameters as declared, and no longer prints a
+  "referenced-but-undeclared" list that was mostly prose from the page's own
+  comments. Its output is now three lines, all of them actionable.
 - The dashboard is a plain `TcpListener` bound to `127.0.0.1` (and `::1`), not
   an `HttpListener`. HTTP.sys opens a **wildcard** socket for a port whatever
   URL prefixes you register and routes by `Host` header, so a client on the
