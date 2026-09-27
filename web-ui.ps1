@@ -1,0 +1,392 @@
+﻿# web-ui.ps1 — a local dashboard for SkillBridge (Windows, PowerShell 5.1 compatible).
+#
+# Serves one self-contained HTML page on http://localhost:<port>/ and a small
+# JSON API next to it, so the whole state of the sync can be looked at (and
+# driven) from a browser instead of reading sync-skills.log by hand:
+#
+#   GET  /              the dashboard (web-ui.html, token injected)
+#   GET  /api/status    one snapshot: source, every target, last run
+#   POST /api/sync      run sync-skills.ps1 and return its output
+#   GET  /api/log       the tail of sync-skills.log
+#   POST /api/db-check  compare the skills folder with cc-switch.db (report only)
+#   POST /api/stop      shut the server down
+#
+# Security has two layers, both of them load-bearing:
+#
+#   1. The listening sockets are bound to 127.0.0.1 (plus ::1 when the stack has
+#      it) and to nothing else. This is why the server is a plain TcpListener
+#      instead of HttpListener: HTTP.sys opens a WILDCARD socket for the port
+#      whatever prefixes you give it and does its own routing on the Host header,
+#      so a client on the LAN that sends "Host: localhost:<port>" is served the
+#      dashboard - and with it the token. Measured on this machine: HttpListener
+#      200s that request, this listener refuses the connection at TCP level.
+#
+#   2. Every /api/ call must carry the per-start token the page was served with.
+#      That is what stops an unrelated web page open in the same browser from
+#      POSTing a sync at us (CSRF). The page on / is the only place the token is
+#      written, and a fresh one is minted on every start.
+#
+# Usage:
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\web-ui.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\web-ui.ps1 -Port 9001 -NoBrowser
+param(
+    [int]$Port = 8765,
+    [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json'),
+    [switch]$NoBrowser
+)
+$ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'common.psm1') -Force
+
+$Root    = $PSScriptRoot
+$LogFile = Join-Path $Root 'sync-skills.log'
+# Per-start token. Anyone holding it already has this page, so it is not a
+# secret - it only proves a request came from the page we served, not from
+# another site's JavaScript running in the same browser.
+$Token   = [Guid]::NewGuid().ToString('N')
+
+function Write-ServerLine {
+    param([string]$Text, [string]$Color = 'Gray')
+    Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Text) -ForegroundColor $Color
+}
+
+# --------------------------------------------------------------- transport ---
+# Minimal HTTP/1.1: parse the request head, hand a hash to Handle-Request, write
+# one response, close. Every response says `Connection: close`, so nothing here
+# has to keep state between requests and the browser never holds a socket the
+# loop needs.
+
+$script:Reasons = @{
+    200 = 'OK'; 400 = 'Bad Request'; 403 = 'Forbidden'; 404 = 'Not Found'
+    405 = 'Method Not Allowed'; 411 = 'Length Required'; 500 = 'Internal Server Error'
+}
+
+function Send-Response {
+    param(
+        $Context,
+        [int]$Code = 200,
+        [string]$ContentType = 'text/plain; charset=utf-8',
+        [string]$Body = '',
+        [switch]$NoCache
+    )
+    $bytes = [Text.Encoding]::UTF8.GetBytes($Body)
+    $reason = $script:Reasons[$Code]
+    if (-not $reason) { $reason = 'OK' }
+    $head = New-Object System.Text.StringBuilder
+    [void]$head.Append("HTTP/1.1 $Code $reason`r`n")
+    [void]$head.Append("Content-Type: $ContentType`r`n")
+    [void]$head.Append("Content-Length: $($bytes.Length)`r`n")
+    if ($NoCache) { [void]$head.Append('Cache-Control: no-store' + "`r`n") }
+    # The page is served over the loopback addresses only, so the browser never
+    # needs a cached copy: stale status is worse than a re-fetch.
+    [void]$head.Append("Connection: close`r`n`r`n")
+    try {
+        $stream = $Context.Client.GetStream()
+        $headBytes = [Text.Encoding]::ASCII.GetBytes($head.ToString())
+        $stream.Write($headBytes, 0, $headBytes.Length)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush()
+        $stream.Close()
+    } catch {
+        # The client went away (tab closed, request aborted): a response nobody
+        # reads. Log it anyway - a silent write failure here is indistinguishable
+        # from a bug in this function, and telling those apart matters.
+        Write-ServerLine "response write failed: $($_.Exception.Message)" 'Red'
+    }
+}
+
+function Send-Json {
+    param($Context, $Value, [int]$Code = 200)
+    $json = ($Value | ConvertTo-Json -Depth 8 -Compress)
+    Send-Response -Context $Context -Code $Code -ContentType 'application/json; charset=utf-8' -Body $json -NoCache
+}
+
+function Read-Request {
+    # Read ONE request from a connected client. Returns $null when the peer sent
+    # nothing usable (an empty probe, a browser that navigated away mid-connect).
+    param($Client)
+    $stream = $Client.GetStream()
+    $buffer = New-Object 'byte[]' 8192
+    $ms     = New-Object IO.MemoryStream
+    $deadline = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $deadline) {
+        # Read blocks until a byte arrives; $Client.ReceiveTimeout (set on accept)
+        # turns "connected and never wrote anything" into an exception instead of
+        # a permanently hung server.
+        $n = $stream.Read($buffer, 0, $buffer.Length)
+        if ($n -le 0) { break }
+        $ms.Write($buffer, 0, $n)
+        if ($ms.Length -gt 65536) { break }  # a request head is never this big
+        $probe = [Text.Encoding]::ASCII.GetString($ms.ToArray())
+        if ($probe.Contains("`r`n`r`n")) { break }
+    }
+    $all = $ms.ToArray()
+    if ($all.Length -eq 0) { return $null }
+    $headText = [Text.Encoding]::UTF8.GetString($all)
+    $split = $headText.IndexOf("`r`n`r`n")
+    if ($split -lt 0) { return $null }
+
+    $lines = $headText.Substring(0, $split) -split "`r?`n"
+    $parts = ($lines[0] -split '\s+', 3)
+    if ($parts.Count -lt 2) { return $null }
+    $headers = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
+    for ($i = 1; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^([^:]+):\s*(.*)$') {
+            $headers[$Matches[1].Trim()] = $Matches[2].Trim()
+        }
+    }
+    # A client that will wait for "100 Continue" before sending its body must be
+    # answered first, or it stalls and this read blocks until the deadline.
+    if ($headers['Expect'] -match '100-continue') {
+        try {
+            $ack = [Text.Encoding]::ASCII.GetBytes("HTTP/1.1 100 Continue`r`n`r`n")
+            $stream.Write($ack, 0, $ack.Length)
+            $stream.Flush()
+        } catch { }
+    }
+
+    $bodyStart  = $split + 4
+    $leftover   = [Math]::Max(0, $all.Length - $bodyStart)
+    $bodyLength = 0
+    if ($headers['Content-Length']) {
+        $parsed = 0
+        if ([int]::TryParse($headers['Content-Length'], [ref]$parsed)) { $bodyLength = $parsed }
+    }
+    # Chunked only ever shows up here if a caller hands no Content-Length; this
+    # API needs no request body at all, so refuse it the way HTTP.sys used to.
+    $chunked = ($headers['Transfer-Encoding'] -match 'chunked')
+
+    # Drain the body even though nothing reads it: closing a socket with unread
+    # bytes pending makes TCP send RST, and the client can lose the response we
+    # are about to write.
+    if (-not $chunked -and $bodyLength -gt 0) {
+        $bodyBuffer = New-Object 'byte[]' $bodyLength
+        $got = if ($leftover -gt 0) { [Math]::Min($leftover, $bodyLength) } else { 0 }
+        if ($got -gt 0) { [Array]::Copy($all, $bodyStart, $bodyBuffer, 0, $got) }
+        $bodyDeadline = (Get-Date).AddSeconds(20)
+        while ($got -lt $bodyLength -and (Get-Date) -lt $bodyDeadline) {
+            $n = $stream.Read($bodyBuffer, $got, $bodyLength - $got)
+            if ($n -le 0) { break }
+            $got += $n
+        }
+    }
+
+    $target = $parts[1]
+    $path   = $target
+    $query  = ''
+    $qmark  = $target.IndexOf('?')
+    if ($qmark -ge 0) {
+        $path  = $target.Substring(0, $qmark)
+        $query = $target.Substring($qmark + 1)
+    }
+    if ($path.Length -gt 1) { $path = $path.TrimEnd('/') }
+    if ($path -eq '') { $path = '/' }
+
+    return [pscustomobject]@{
+        Client  = $Client
+        method  = $parts[0].ToUpperInvariant()
+        path    = $path
+        query   = $query
+        headers = $headers
+        chunked = $chunked
+        body    = ''
+    }
+}
+
+function Get-LogTail {
+    # $AllLines is deliberately NOT called $lines: PowerShell variables are
+    # case-insensitive, so `$lines` would silently overwrite the [int] $Lines
+    # parameter and Select-Object -Last would fail to bind it.
+    param([int]$Lines = 200)
+    if (-not (Test-Path -LiteralPath $LogFile)) {
+        return [pscustomobject]@{ exists = $false; total = 0; lines = @() }
+    }
+    # Get-Content decodes as ANSI under 5.1, which turns the Chinese lines
+    # check-db-sync.py appends into mojibake. Read the bytes as UTF-8 instead.
+    $text     = [IO.File]::ReadAllText($LogFile, [Text.Encoding]::UTF8)
+    $allLines = @($text -split "`r?`n" | Where-Object { $_ -ne '' })
+    $tail     = @($allLines | Select-Object -Last $Lines)
+    return [pscustomobject]@{ exists = $true; total = $allLines.Count; lines = $tail }
+}
+
+function Invoke-Sync {
+    # Run in a child process: the server keeps no state about a sync, and the
+    # exit code / trap inside sync-skills.ps1 stay the single source of truth.
+    $script = Join-Path $Root 'sync-skills.ps1'
+    if (-not (Test-Path -LiteralPath $script)) {
+        return [pscustomobject]@{ ran = $false; error = "sync-skills.ps1 not found: $script" }
+    }
+    try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -ConfigPath $ConfigPath 2>&1 | Out-String
+    $code = $LASTEXITCODE
+    if ($null -eq $code) { $code = -1 }
+    return [pscustomobject]@{
+        ran       = $true
+        ok        = ($code -eq 0)
+        exit_code = $code
+        output    = (($out -replace "`r?`n", "`n").Trim())
+        status    = (Read-RunStatus (Get-RunStatusPath $LogFile))
+    }
+}
+
+function Invoke-DbCheck {
+    # Report only. check-db-sync.py --fix deletes rows from CC Switch's own
+    # database, and a row is the only record of a skill's origin, so no
+    # automatic caller is ever allowed to pass it.
+    $py        = Resolve-PythonExe
+    $pyScript  = Join-Path $Root 'check-db-sync.py'
+    if (-not $py -or -not (Test-Path -LiteralPath $pyScript)) {
+        return [pscustomobject]@{ ran = $false; error = 'python or check-db-sync.py not found' }
+    }
+    $db = Join-Path $env:USERPROFILE '.cc-switch\cc-switch.db'
+    if (-not (Test-Path -LiteralPath $db)) {
+        return [pscustomobject]@{ ran = $false; error = "database not found: $db" }
+    }
+    $snap = Get-SkillBridgeStatus -ConfigPath $ConfigPath -SkipFingerprints
+    try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+    $out = & $py $pyScript --source $snap.source --db $db 2>&1 | Out-String
+    $code = $LASTEXITCODE
+    if ($null -eq $code) { $code = -1 }
+    return [pscustomobject]@{
+        ran       = $true
+        ok        = ($code -eq 0)
+        exit_code = $code
+        output    = (($out -replace "`r?`n", "`n").Trim())
+    }
+}
+
+function Handle-Request {
+    param($req)
+    if ($req.path -eq '/') {
+        Send-Response -Context $req -ContentType 'text/html; charset=utf-8' -Body $script:Page
+        return
+    }
+
+    # Everything below is an action: prove the caller is our own page.
+    if (-not $req.headers.ContainsKey('X-SB-Token') -or $req.headers['X-SB-Token'] -ne $script:Token) {
+        Write-ServerLine "403 $($req.method) $($req.path) (missing/incorrect token)"
+        Send-Json -Context $req -Code 403 -Value @{ error = 'bad or missing X-SB-Token' }
+        return
+    }
+    if ($req.chunked) {
+        Send-Json -Context $req -Code 411 -Value @{ error = 'send Content-Length, not chunked' }
+        return
+    }
+
+    switch -Regex ($req.path) {
+        '^/api/status$' {
+            Send-Json -Context $req -Value (Get-SkillBridgeStatus -ConfigPath $ConfigPath)
+            return
+        }
+        '^/api/log$' {
+            $lines = 200
+            # The query is everything AFTER the '?' and is '&'-separated, so the
+            # anchor has to be "start of string" or '&' - never '?'.
+            if ($req.query -match '(?:^|&)lines=(\d+)') {
+                $lines = [Math]::Min(2000, [int]$Matches[1])
+            }
+            Send-Json -Context $req -Value (Get-LogTail -Lines $lines)
+            return
+        }
+        '^/api/sync$' {
+            if ($req.method -ne 'POST') {
+                Send-Json -Context $req -Code 405 -Value @{ error = 'POST only' }
+                return
+            }
+            Write-ServerLine 'sync requested' 'Cyan'
+            $result = Invoke-Sync
+            Write-ServerLine ("sync finished: exit={0}" -f $result.exit_code) $(if ($result.ok) { 'Green' } else { 'Red' })
+            Send-Json -Context $req -Value $result
+            return
+        }
+        '^/api/db-check$' {
+            if ($req.method -ne 'POST') {
+                Send-Json -Context $req -Code 405 -Value @{ error = 'POST only' }
+                return
+            }
+            Write-ServerLine 'database check requested' 'Cyan'
+            Send-Json -Context $req -Value (Invoke-DbCheck)
+            return
+        }
+        '^/api/stop$' {
+            Send-Json -Context $req -Value @{ stopping = $true }
+            $script:Stopping = $true
+            return
+        }
+    }
+    Send-Json -Context $req -Code 404 -Value @{ error = "not found: $($req.path)" }
+}
+
+# ---------------------------------------------------------------- listener ---
+$pagePath = Join-Path $Root 'web-ui.html'
+if (-not (Test-Path -LiteralPath $pagePath)) {
+    Write-Host "[ERROR] web-ui.html not found next to web-ui.ps1: $pagePath" -ForegroundColor Red
+    exit 1
+}
+$script:Page = ([IO.File]::ReadAllText($pagePath, [Text.Encoding]::UTF8)).Replace('__SB_TOKEN__', $Token)
+$script:Stopping = $false
+
+# Loopback only. Two listeners because the browser may resolve `localhost` to
+# ::1 first and would otherwise wait out its fallback before the page loads.
+$script:Listeners = @()
+try {
+    $v4 = New-Object System.Net.Sockets.TcpListener ([System.Net.IPAddress]::Loopback), $Port
+    $v4.Start()
+    $script:Listeners += $v4
+} catch {
+    Write-ServerLine ("cannot listen on 127.0.0.1:{0} : {1}" -f $Port, $_.Exception.Message) 'Red'
+}
+try {
+    $v6 = New-Object System.Net.Sockets.TcpListener ([System.Net.IPAddress]::IPv6Loopback), $Port
+    $v6.Start()
+    $script:Listeners += $v6
+} catch {
+    # No IPv6 stack (or the port is IPv4-only). The page falls back to 127.0.0.1.
+}
+if ($script:Listeners.Count -eq 0) {
+    Write-Host ''
+    Write-Host "[ERROR] could not open port $Port. Another SkillBridge UI (or another" -ForegroundColor Red
+    Write-Host "        program) may already be using it. Try: -Port <another number>" -ForegroundColor Red
+    exit 1
+}
+
+$url = "http://localhost:$Port/"
+Write-Host ''
+Write-Host '  SkillBridge Web UI' -ForegroundColor Cyan
+Write-Host "  $url" -ForegroundColor White
+Write-Host ''
+Write-ServerLine 'listening (loopback only: 127.0.0.1 / ::1)'
+Write-ServerLine 'press Ctrl+C, or use the 停止服务 button, to shut down'
+
+if (-not $NoBrowser) {
+    try { Start-Process $url } catch { }
+}
+
+try {
+    while (-not $script:Stopping) {
+        $client = $null
+        foreach ($l in $script:Listeners) {
+            if ($l.Pending()) { $client = $l.AcceptTcpClient(); break }
+        }
+        if ($null -eq $client) { Start-Sleep -Milliseconds 20; continue }
+        try {
+            # A client that connects and sends nothing (or a scanner) must not
+            # wedge the single-threaded loop; 20s of silence and it is dropped.
+            $client.ReceiveTimeout = 20000
+            $client.SendTimeout    = 20000
+            # One request at a time. Every response closes its connection, so the
+            # browser is never left holding a socket this loop needs.
+            $request = Read-Request $client
+            if ($null -ne $request) { Handle-Request $request }
+        } catch {
+            # A broken request (client aborted, serialization error) must not
+            # take the server down with it.
+            Write-ServerLine "request failed: $($_.Exception.Message)" 'Red'
+            try { Send-Json -Context @{ Client = $client } -Code 500 -Value @{ error = $_.Exception.Message } } catch { }
+        } finally {
+            try { $client.Close() } catch { }
+        }
+    }
+} finally {
+    foreach ($l in $script:Listeners) { try { $l.Stop() } catch { } }
+    Write-ServerLine 'stopped'
+}

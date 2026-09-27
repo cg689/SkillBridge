@@ -1,8 +1,10 @@
 ﻿# tests/smoke-windows.ps1 — functional smoke test for the Windows (junction) sync path.
 #
-# Creates a temp source with one fake skill and a temp target, runs sync-skills.ps1
-# twice, and asserts: junction created, idempotent on second run, underscore
-# archives skipped, dead junctions pruned, tool-owned dirs left alone. Also runs
+# Creates a temp source with two fake skills and a temp target, runs
+# sync-skills.ps1 several times, and asserts: junction created, underscore
+# archives skipped, tool-owned dirs left alone, the junction AND copy of a
+# DELETED source skill pruned, while a dangling junction that is not ours (its
+# target is outside the source) survives untouched. Also runs
 # detect-tools.ps1 -All and asserts it produces a valid config.json that includes
 # Cursor, honours `exclude` (never re-adds a deliberately removed tool) and keeps
 # custom targets; that a copy which died halfway is left marked and repaired on
@@ -35,11 +37,17 @@ $env:SKILLBRIDGE_NO_NOTIFY = '1'
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('sb-smoke-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path (Join-Path $tmp 'src\demo-skill') -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $tmp 'src\gone-skill') -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $tmp 'src\_archived') -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $tmp 'tgt\own-skill') -Force | Out-Null
 Set-Content -Path (Join-Path $tmp 'src\demo-skill\SKILL.md') -Value '# demo' -Encoding UTF8
+Set-Content -Path (Join-Path $tmp 'src\gone-skill\SKILL.md') -Value '# gone' -Encoding UTF8
 Set-Content -Path (Join-Path $tmp 'src\_archived\SKILL.md') -Value '# archive' -Encoding UTF8
 
+# `dead-skill` is a DANGLING junction whose target is OUTSIDE the source. It is
+# not ours, so the sync must leave it alone even though it is dead: it looks
+# exactly like a user's own shortcut to an unmounted drive. The dead link the
+# sync owes a prune is `gone-skill`'s, once the source folder is deleted below.
 $deadTarget = Join-Path $tmp 'will-vanish'
 New-Item -ItemType Directory -Path $deadTarget -Force | Out-Null
 New-Item -ItemType Junction -Path (Join-Path $tmp 'tgt\dead-skill') -Target $deadTarget | Out-Null
@@ -95,14 +103,14 @@ try {
     # run 1: link created; unresolved-%VAR% target skipped (not counted, no literal dir)
     $out1 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
     Assert-HaveSummary $out1 'first run'
-    if ($out1 -notmatch 'created=2') {
-        throw "FAIL: first run expected created=2 (link+copy), got: $out1"
+    if ($out1 -notmatch 'created=4') {
+        throw "FAIL: first run expected created=4 (2 links + 2 copies), got: $out1"
     }
-    if ($out1 -notmatch 'pruned=1') {
-        throw "FAIL: first run expected pruned=1, got: $out1"
+    if ($out1 -notmatch 'pruned=0') {
+        throw "FAIL: first run must prune nothing (no source skill is gone yet), got: $out1"
     }
-    if ($out1 -notmatch 'skills=1') {
-        throw "FAIL: first run expected skills=1 (archive skipped), got: $out1"
+    if ($out1 -notmatch 'skills=2') {
+        throw "FAIL: first run expected skills=2 (archive skipped), got: $out1"
     }
     # A successful hidden run must record itself — this is what makes a silent
     # crash visible next time.
@@ -123,8 +131,11 @@ try {
     if (Test-Path (Join-Path $tmp 'tgt\_archived')) {
         throw 'FAIL: underscore-prefixed archive was linked'
     }
-    if (Test-Path (Join-Path $tmp 'tgt\dead-skill')) {
-        throw 'FAIL: dead junction was not pruned'
+    # The dangling junction is NOT ours: only a link into the source is. Deleting
+    # it silently is the bug this guards (it happens to look exactly like a
+    # user's own shortcut to an unmounted drive).
+    if (-not (Test-Path (Join-Path $tmp 'tgt\dead-skill'))) {
+        throw 'FAIL: a dead junction whose target is outside the source was deleted - it is not ours'
     }
     if ($relMade) {
         $rel = Get-Item (Join-Path $tmp 'tgt\rel-link') -Force
@@ -166,18 +177,30 @@ try {
     if ($logText -notmatch 'created  Smoke : demo-skill') {
         throw "FAIL: log did not record tool name 'Smoke': $logText"
     }
-    if ($logText -notmatch 'pruned   Smoke : dead-skill') {
-        throw "FAIL: log did not record prune of dead-skill: $logText"
-    }
 
-    # run 2: idempotent
+    # run 2: delete a source skill - its junction AND its copy are ours, so both
+    # go. The dangling junction planted for run 1 is not ours and must stay.
+    Remove-Item -LiteralPath (Join-Path $tmp 'src\gone-skill') -Recurse -Force
     $out2 = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $cfgPath
     Assert-HaveSummary $out2 'second run'
-    if ($out2 -notmatch 'skipped=2') {
-        throw "FAIL: second run not idempotent (expected skipped=2, got: $out2)"
+    if ($out2 -notmatch 'pruned=2') {
+        throw "FAIL: second run expected pruned=2 (the deleted skill's link + copy), got: $out2"
     }
-    if ($out2 -notmatch 'pruned=0') {
-        throw "FAIL: second run expected pruned=0, got: $out2"
+    if ($out2 -notmatch 'skipped=2') {
+        throw "FAIL: second run not idempotent for the surviving skill (expected skipped=2, got: $out2)"
+    }
+    $logText = Get-Content $log -Raw
+    if ($logText -notmatch 'pruned   Smoke : gone-skill') {
+        throw "FAIL: log did not record prune of gone-skill: $logText"
+    }
+    if (Test-Path (Join-Path $tmp 'tgt\gone-skill')) {
+        throw 'FAIL: dead junction of the deleted source skill was not pruned'
+    }
+    if (Test-Path (Join-Path $tmp 'tgt-copy\gone-skill')) {
+        throw 'FAIL: copy of the deleted source skill was not pruned'
+    }
+    if (-not (Test-Path (Join-Path $tmp 'tgt\dead-skill'))) {
+        throw 'FAIL: the not-ours dangling junction did not survive the prune pass'
     }
     if (-not (Test-Path (Join-Path $tmp 'tgt-copy\own-skill\SKILL.md'))) {
         throw 'FAIL: polluted managed list deleted a tool-owned own-skill'
@@ -307,7 +330,7 @@ try {
         throw 'FAIL: junction into a source-sibling no longer points at the backup copy'
     }
 
-    Write-Host 'OK: windows smoke (junction+copy, marker ownership, relative-target symlink kept, sibling-prefix not ours, scripts refresh, dest!=src, Cursor upgrade, -CopyInto)'
+    Write-Host 'OK: windows smoke (junction+copy, marker ownership, relative-target symlink kept, not-ours dangling junction kept, deleted skill pruned, sibling-prefix not ours, scripts refresh, dest!=src, Cursor upgrade, -CopyInto)'
 
     # detect-tools: produces a valid config.json that includes Cursor
     & (Join-Path $root 'detect-tools.ps1') -All | Out-Null

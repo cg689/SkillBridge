@@ -25,6 +25,7 @@ Every AI coding tool maintains its own `skills/` directory. Copying skills aroun
 - **Dead links are pruned** — when a skill is deleted, the links it left behind are cleaned up instead of accumulating.
 - **CC Switch database drift is reported, never auto-repaired** — a row in `cc-switch.db` is the only record of a skill's origin (repo, branch, readme URL), so the sync reports drift and leaves the decision to you. Off by default (`"check_db": true` enables the report).
 - **Failures surface themselves** — the scheduled run is hidden, so every run records its outcome in `.skillbridge-status.json`; a failure also raises a toast, and `detect-tools` replays the last outcome on its next run.
+- **A local dashboard** — `启动WebUI.bat` shows the whole state in a browser tab (see [Web UI](#web-ui)).
 - **Idempotent & safe** — existing entries are never overwritten; a tool's own skills are never touched.
 - **Portable** — every path uses environment variables (`%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%`), so it runs on any machine as-is.
 
@@ -34,6 +35,7 @@ Every AI coding tool maintains its own `skills/` directory. Copying skills aroun
 - Config-driven targets (`config.json`) — add or drop a tool in one line
 - Auto-detection (`detect-tools.ps1` / `detect-tools.sh`) — adapts to whatever is installed on a machine
 - Auto-link at logon / boot (`install-autolink.ps1` / `.sh`) with optional interval
+- **Web UI** (`web-ui.ps1` + `启动WebUI.bat`) — a local dashboard: per-target state, the log tail, one-click sync and a read-only database check
 - Cross-platform: PowerShell (Windows) and Bash (macOS / Linux)
 - Pure scripts, no daemon; Windows needs nothing extra, macOS / Linux need `python3` (for config parsing)
 
@@ -62,6 +64,22 @@ chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
 ./sync-skills.sh          # sync once
 ./install-autolink.sh     # register auto-link (macOS: at login / Linux: at boot)
 ```
+
+## Web UI
+
+Windows only (PowerShell). Double-click **`启动WebUI.bat`** — it starts the server, opens your browser at `http://localhost:8765/`, and closes again with the console window (or the 停止 button in the page):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\web-ui.ps1                # default port 8765
+powershell -NoProfile -ExecutionPolicy Bypass -File .\web-ui.ps1 -Port 9001 -NoBrowser
+```
+
+The page shows one card per configured target (skills found, links created, copies updated, dead links pruned, failures), the tail of `sync-skills.log`, and two actions: **立即同步** runs the real `sync-skills.ps1` and streams its summary, and **数据库检查** runs the same *report-only* CC Switch database comparison the sync does — it never deletes rows. Every card expands to the per-target detail of the last run. It refreshes the snapshot every 15 seconds.
+
+Two design points worth knowing:
+
+- **It listens on nothing but this machine.** The sockets are bound to `127.0.0.1` (and `::1`), so a connection from the LAN is refused at the TCP level. This is why `web-ui.ps1` is a plain `TcpListener` rather than `HttpListener`: HTTP.sys opens a *wildcard* socket for the port whatever prefixes you give it and routes by `Host` header, so a LAN client sending `Host: localhost:8765` gets served the dashboard — token included. `tests/smoke-webui.ps1` asserts the LAN refusal so this cannot quietly regress.
+- **Every API call carries a per-start token** minted when the server starts and written only into the page it serves. That is what stops another site's JavaScript, running in the same browser, from POSTing a sync at the dashboard (CSRF). It proves a request came from the page you were served, not that it came from a stranger — which is exactly what a loopback-only server needs.
 
 ## Installation on a New Machine
 
@@ -137,6 +155,9 @@ SkillBridge/
 ├── sync-skills.ps1         # Windows sync script (junctions)
 ├── sync-skills.sh          # Unix sync script (symlinks)
 ├── check-db-sync.py        # compare/report CC Switch's skill DB (called by sync)
+├── web-ui.ps1              # local dashboard server (Windows, loopback-only)
+├── web-ui.html             # the dashboard page web-ui.ps1 serves
+├── 启动WebUI.bat           # double-click to open the dashboard
 ├── install-autolink.ps1    # Windows: register scheduled task
 ├── install-autolink.sh     # Unix: register launchd / crontab
 ├── supported-tools.json    # catalog of supported tools (source of truth)

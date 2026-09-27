@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A local dashboard** (`web-ui.ps1` + `web-ui.html`, started by double-clicking
+  `启动WebUI.bat`): one page on `http://localhost:<port>/` showing the whole
+  state of the sync — the source, a card per target (skills found, links
+  created, copies updated, dead links pruned, failures), the tail of
+  `sync-skills.log`, and two actions: run a sync, or run the same *report-only*
+  CC Switch database check the sync does. It refreshes every 15 seconds and
+  stops with the console window or a button in the page.
+- `Get-SkillBridgeStatus` in `common.psm1`: one snapshot of the whole sync
+  state (source, per-target linked / missing / copied / failed, last run
+  record) that the dashboard, the smoke suite and any other caller share, so
+  "what does the sync think" has exactly one implementation.
+- `tests/smoke-webui.ps1`: drives the dashboard's API the way the page does
+  and asserts that every call without the per-start token is refused (403),
+  that `GET /api/sync` and `GET /api/db-check` are 405, that a driven sync
+  really creates the junction and the copy and exits 0, that
+  `POST /api/db-check` leaves `cc-switch.db` byte-identical, that the listener
+  is on `127.0.0.1` / `::1` only (a connection to this machine's own LAN
+  address is refused), and that `POST /api/stop` shuts it down cleanly. CI now
+  runs it in both Windows jobs.
 - Failure is no longer silent. Every run overwrites `.skillbridge-status.json`
   with `ok` / `warn` / `fail`, a timestamp and a message; `fail` / `warn` also
   raise a Windows toast (`notify-send` on Unix desktops), and `detect-tools`
@@ -43,6 +62,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the .bat launchers and the scheduled task actually use), not just pwsh 7.
 
 ### Changed
+- The dashboard is a plain `TcpListener` bound to `127.0.0.1` (and `::1`), not
+  an `HttpListener`. HTTP.sys opens a **wildcard** socket for a port whatever
+  URL prefixes you register and routes by `Host` header, so a client on the
+  LAN that sends `Host: localhost:<port>` was served the dashboard — and with
+  it the per-start token. Measured here: `HttpListener` answered that request
+  with 200, the loopback listener refuses the connection at TCP level. Every
+  `/api/` call must also carry the token the page was served with, which is
+  what stops another open page in the same browser from POSTing a sync (CSRF).
 - `check-db-sync.py` is **report-only** when run from a sync, and `check_db`
   now defaults to `false`. A row in `cc-switch.db` is the only record of a
   skill's origin (repo owner/name/branch, readme URL); when a folder merely
@@ -73,6 +100,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the file itself.
 
 ### Fixed
+- Dead-link pruning deleted links it did not own. Every other deletion path
+  already required the link to point *into the source*; pruning only required
+  the link to be dead, so a junction or symlink whose target had simply gone
+  away — a user's link to an unmounted drive, a shortcut into another tool's
+  folder — was silently removed with the tool's own skills keeping no record
+  of it. Both `sync-skills.ps1` and `sync-skills.sh` now apply the same
+  ownership rule here as everywhere else, and the smoke suites grow a fixture
+  for it on both platforms.
 - `tests/test-catalog.py`'s target-count check was conditional on the phrase
   "共 N 个" being present in `支持的软件列表.md`, so deleting the phrase deleted
   the check itself instead of failing — the same class of vacuous guard as the CI

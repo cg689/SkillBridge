@@ -47,6 +47,10 @@ jobs:
         shell: pwsh
         run: |
           .\tests\smoke-windows.ps1
+      - name: Web UI smoke test (dashboard API + loopback bind)
+        shell: pwsh
+        run: |
+          .\tests\smoke-webui.ps1
       - name: AutoLink dry-run (no real registration)
         shell: pwsh
         run: |
@@ -80,6 +84,10 @@ jobs:
         shell: powershell
         run: |
           .\tests\smoke-windows.ps1
+      - name: Web UI smoke test (5.1)
+        shell: powershell
+        run: |
+          .\tests\smoke-webui.ps1
       - name: AutoLink dry-run (no real registration)
         shell: powershell
         run: |

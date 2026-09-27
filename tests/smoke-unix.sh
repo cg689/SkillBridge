@@ -5,11 +5,12 @@
 # twice, and asserts: link created, idempotent on second run. Also asserts that an
 # unset %HERMES_HOME% target is skipped with a warning and never degrades to
 # creating /skills at the filesystem root; that underscore-prefixed archives are
-# not linked; that dead symlinks are pruned; that a copy which died halfway is
-# left marked and repaired on the next run; that detect-tools.sh --all
-# writes a valid config.json and honours `exclude`; and that a missing/invalid
-# option value fails fast instead of spinning. Restores the repo log and
-# config.json afterwards.
+# not linked; that the link AND copy of a deleted source skill are pruned while a
+# dead symlink we do not own (target outside the source) survives; that a copy
+# which died halfway is left marked and repaired on the next run; that
+# detect-tools.sh --all writes a valid config.json and honours `exclude`; and that
+# a missing/invalid option value fails fast instead of spinning. Restores the repo
+# log and config.json afterwards.
 #
 # Usage: bash tests/smoke-unix.sh
 set -eu
@@ -59,7 +60,13 @@ TGT="$TMP/tgt"
 mkdir -p "$SRC/demo-skill" "$SRC/_archived" "$TGT/own-skill"
 echo "# demo" > "$SRC/demo-skill/SKILL.md"
 echo "# archive" > "$SRC/_archived/SKILL.md"
-ln -s /nonexistent/skillbridge-dead "$TGT/dead-skill"
+# `not-ours-link` is a DANGLING symlink whose target is outside the source. It is
+# not ours, so the sync must leave it alone even though it is dead: it looks
+# exactly like a user's own shortcut to an unmounted drive. The dead link the sync
+# owes a prune is gone-skill's, once the source folder is deleted further down.
+mkdir -p "$TMP/will-vanish"
+ln -s "$TMP/will-vanish" "$TGT/not-ours-link"
+rm -rf "$TMP/will-vanish"
 # A live symlink with a RELATIVE target must survive pruning: it resolves
 # against the link's own directory, not the process CWD. rel-link sits in
 # $TGT, so its ../rel-real target must exist one level UP, in $TMP.
@@ -129,8 +136,8 @@ if [ -e "$TGT/_archived" ] || [ -L "$TGT/_archived" ]; then
     echo "FAIL: underscore-prefixed archive was linked" >&2
     exit 1
 fi
-if [ -L "$TGT/dead-skill" ] || [ -e "$TGT/dead-skill" ]; then
-    echo "FAIL: dead symlink was not pruned" >&2
+if [ ! -L "$TGT/not-ours-link" ]; then
+    echo "FAIL: a dead symlink whose target is outside the source was pruned - it is not ours" >&2
     exit 1
 fi
 if [ ! -L "$TGT/rel-link" ] || [ ! -e "$TGT/rel-link" ]; then
@@ -164,11 +171,6 @@ PY
 
 if ! grep -q 'created  Smoke : demo-skill' "$LOG"; then
     echo "FAIL: log did not record tool name 'Smoke' (got:)" >&2
-    cat "$LOG" >&2
-    exit 1
-fi
-if ! grep -q 'pruned   Smoke : dead-skill' "$LOG"; then
-    echo "FAIL: log did not record prune of dead-skill (got:)" >&2
     cat "$LOG" >&2
     exit 1
 fi
@@ -265,6 +267,16 @@ if [ -e "$TGT-copy/gone-skill" ] || [ -L "$TGT/gone-skill" ]; then
     echo "FAIL: gone-skill was not pruned from copy/link targets" >&2
     exit 1
 fi
+if ! grep -q 'pruned   Smoke : gone-skill' "$LOG"; then
+    echo "FAIL: log did not record prune of gone-skill (got:)" >&2
+    cat "$LOG" >&2
+    exit 1
+fi
+# The dangling symlink that is not ours must have survived every run so far.
+if [ ! -L "$TGT/not-ours-link" ]; then
+    echo "FAIL: the not-ours dead symlink did not survive the prune pass" >&2
+    exit 1
+fi
 
 if ! bash "$ROOT/sync-skills.sh" --copy-into "$TMP/proj/.cursor/skills" "$TMP/cfg.json" >/dev/null; then
     echo "FAIL: --copy-into exited non-zero" >&2
@@ -334,7 +346,7 @@ if ! grep -q 'backup' "$TMP/own-tgt/demo-skill/SKILL.md"; then
     exit 1
 fi
 
-echo "OK: unix smoke (link+copy, marker ownership, relative-target symlink kept, sibling-prefix not ours, scripts refresh, dest!=src, Cursor upgrade, --copy-into)"
+echo "OK: unix smoke (link+copy, marker ownership, relative-target symlink kept, not-ours dead link kept, deleted skill pruned, sibling-prefix not ours, scripts refresh, dest!=src, Cursor upgrade, --copy-into)"
 
 # detect-tools.sh --all writes a config that includes every catalogued tool
 if ! bash "$ROOT/detect-tools.sh" --all >/dev/null; then

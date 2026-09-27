@@ -1,8 +1,8 @@
 ﻿# common.psm1 — shared helpers for the SkillBridge PowerShell scripts.
 #
-# Imported (dot-sourced) from sync-skills.ps1, detect-tools.ps1 and
-# install-autolink.ps1 so that env-var path expansion, config loading and log
-# writes live in ONE place across all scripts.
+# Imported (dot-sourced) from sync-skills.ps1, detect-tools.ps1,
+# install-autolink.ps1 and web-ui.ps1 so that env-var path expansion, config
+# loading and log writes live in ONE place across all scripts.
 
 function Expand-EnvPath {
     param([string]$Path)
@@ -434,4 +434,231 @@ function Show-StatusToast {
     } catch {
         # No interactive desktop (or no WinForms): the status file is the record.
     }
+}
+
+function Get-SkillBridgeStatus {
+    param(
+        [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json'),
+        # Hashing every file of every copy-mode target is the slow part of this
+        # function (seconds with 100+ skills). Callers that only need link
+        # counts pass this and get no stale/out-of-date detection.
+        [switch]$SkipFingerprints
+    )
+    # ONE snapshot of the whole setup - source, every target, last run - shared
+    # by detect-tools.ps1, the health check and the web UI. They read the same
+    # object so they can never disagree about what is missing, dead, stale or
+    # owned by the tool itself.
+    #
+    # Field meanings (the sync acts on exactly these):
+    #   linked  - a live link into the source, counted once per source skill
+    #   copied  - copy-mode skills we own; `stale` is how many of them differ
+    #             from the source by content hash
+    #   missing - source skills with no entry of ours in the target
+    #   orphans - entries we own whose source skill is gone (sync prunes these)
+    #   dead    - links that are not ours and do not resolve (never touched)
+    #   foreign - the tool's own folders; shadowed = name collides with a source
+    #             skill, which makes the sync skip that skill silently
+    $snapshot = [ordered]@{
+        generated_at  = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        health        = 'error'
+        error         = ''
+        config_path   = $ConfigPath
+        source        = ''
+        source_exists = $false
+        skill_count   = 0
+        skills        = @()
+        link_type     = 'junction'
+        check_db      = $false
+        autolink      = $null
+        targets       = @()
+        totals        = $null
+        needs_sync    = $false
+        last_run      = $null
+    }
+
+    $config = Read-ConfigFile $ConfigPath
+    if ($null -eq $config) {
+        $snapshot.error = if (Test-Path -LiteralPath $ConfigPath) {
+            "could not parse config: $ConfigPath"
+        } else {
+            "config not found: $ConfigPath"
+        }
+        return [pscustomobject]$snapshot
+    }
+
+    $src = ([string](Expand-EnvPath ([string]$config.source))).Trim()
+    $snapshot.source        = $src
+    $snapshot.source_exists = [bool](Test-Path -LiteralPath $src)
+    $snapshot.link_type     = if ($config.link_type) { [string]$config.link_type } else { 'junction' }
+    $snapshot.check_db      = if ($null -ne $config.check_db) { [bool]$config.check_db } else { $false }
+    $defaults = Get-AutolinkDefaults $config.autolink
+    $snapshot.autolink = [pscustomobject]@{
+        enabled          = $defaults.enabled
+        at_logon         = $defaults.at_logon
+        interval_minutes = $defaults.interval_minutes
+    }
+
+    $skillDirs = @()
+    if ($snapshot.source_exists) {
+        $skillDirs = @(Get-ChildItem -LiteralPath $src -Directory -ErrorAction SilentlyContinue |
+            Where-Object {
+                # Same two rules as sync-skills.ps1: `_archived/` is not a skill,
+                # and a folder without SKILL.md is not one either.
+                -not $_.Name.StartsWith('_') -and (Test-Path (Join-Path $_.FullName 'SKILL.md'))
+            } | Sort-Object Name)
+    }
+    $skillNames = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($s in $skillDirs) { [void]$skillNames.Add($s.Name) }
+    $snapshot.skill_count = $skillDirs.Count
+    $snapshot.skills      = @($skillDirs | ForEach-Object { $_.Name })
+
+    # One hash per source skill, reused by every copy target below.
+    $sourceFingerprints = @{}
+    if (-not $SkipFingerprints -and $skillDirs.Count -gt 0) {
+        foreach ($s in $skillDirs) {
+            $sourceFingerprints[$s.Name] = Get-SkillFingerprint $s.FullName
+        }
+    }
+
+    $targets = @()
+    if ($config.targets) {
+        foreach ($entry in $config.targets.PSObject.Properties) {
+            $spec = Get-TargetSpec $entry.Value -Name $entry.Name
+            $row = [pscustomobject]@{
+                name          = [string]$entry.Name
+                path          = $spec.Path
+                mode          = $spec.Mode
+                resolved_path = ''
+                exists        = $false
+                linked        = 0
+                copied        = 0
+                stale         = 0
+                missing       = @()
+                orphans       = @()
+                dead          = @()
+                foreign       = @()
+                shadowed      = @()
+                issues        = @()
+            }
+            $targets += $row
+
+            $tdir = Resolve-TargetPath $spec.Path
+            if (-not (Assert-ExpandablePath $tdir $row.name)) {
+                $row.issues += "unresolved path: $($spec.Path)"
+                continue
+            }
+            $row.resolved_path = $tdir
+            $row.exists = [bool](Test-Path -LiteralPath $tdir)
+            if (-not $row.exists) {
+                # Not a fault: the first sync creates the directory.
+                $row.issues += 'directory does not exist yet (the next sync creates it)'
+                $row.missing = @($snapshot.skills)
+                continue
+            }
+            if (Test-SameResolvedPath $tdir $src) {
+                $row.issues += 'target path is the source itself - nothing to sync into'
+                continue
+            }
+
+            $present = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+            $marker = Get-CopyMarkerName
+            foreach ($item in @(Get-ChildItem -LiteralPath $tdir -Force -ErrorAction SilentlyContinue)) {
+                if (-not $item.PSIsContainer) { continue }
+                # Our own bookkeeping files: never an entry, never a target's skill.
+                if ($item.Name -eq $marker -or $item.Name -eq '.skillbridge-managed.json') { continue }
+
+                if (Test-OurSkillEntry $item $src) {
+                    if ($skillNames.Contains($item.Name)) {
+                        [void]$present.Add($item.Name)
+                        if ($spec.Mode -eq 'copy') {
+                            $row.copied++
+                            if (Test-ReparsePoint $item) {
+                                # A link left behind by an older config: Cloud
+                                # Agents cannot follow one, so the next sync
+                                # replaces it with a real copy.
+                                $row.issues += "$($item.Name): still a link in a copy target (next sync replaces it)"
+                            } elseif (-not $SkipFingerprints) {
+                                if ($sourceFingerprints[$item.Name] -ne (Get-SkillFingerprint $item.FullName)) {
+                                    $row.stale++
+                                    $row.issues += "$($item.Name): copy differs from the source (next sync refreshes it)"
+                                }
+                            }
+                        } else {
+                            $row.linked++
+                        }
+                    } else {
+                        # Ours, but the skill is gone from the source: a dead
+                        # junction or a copy left behind. The sync prunes these.
+                        $row.orphans += $item.Name
+                    }
+                    continue
+                }
+
+                if (Test-ReparsePoint $item) {
+                    # Someone else's link. We never delete what is not ours, so
+                    # only report it when it does not resolve at all.
+                    $t = [string]$item.Target
+                    $resolved = $t
+                    if ($t -and -not [IO.Path]::IsPathRooted($t)) {
+                        # A relative target resolves against the link's own
+                        # directory, not the process CWD.
+                        $resolved = [IO.Path]::GetFullPath(
+                            (Join-Path (Split-Path -Parent $item.FullName) $t))
+                    }
+                    if (-not $resolved -or -not (Test-Path -LiteralPath $resolved)) {
+                        $row.dead += $item.Name
+                    }
+                    continue
+                }
+
+                if ($skillNames.Contains($item.Name)) {
+                    # The tool ships its own folder under this skill's name, so
+                    # the sync skips the source skill for this target forever.
+                    $row.shadowed += $item.Name
+                    $row.foreign   += $item.Name
+                    $row.issues    += "$($item.Name): the tool's own folder uses this name, so the source skill is skipped"
+                } else {
+                    $row.foreign += $item.Name
+                }
+            }
+
+            $row.missing = @($snapshot.skills | Where-Object { -not $present.Contains($_) })
+        }
+    }
+    $snapshot.targets = $targets
+
+    $sum = @{
+        targets = $targets.Count; linked = 0; copied = 0; stale = 0
+        missing = 0; orphans = 0; dead = 0; foreign = 0; shadowed = 0; issues = 0
+    }
+    foreach ($t in $targets) {
+        $sum.linked   += $t.linked
+        $sum.copied   += $t.copied
+        $sum.stale    += $t.stale
+        $sum.missing  += @($t.missing).Count
+        $sum.orphans  += @($t.orphans).Count
+        $sum.dead     += @($t.dead).Count
+        $sum.foreign  += @($t.foreign).Count
+        $sum.shadowed += @($t.shadowed).Count
+        $sum.issues   += @($t.issues).Count
+    }
+    $snapshot.totals = [pscustomobject]$sum
+    $snapshot.needs_sync = ($sum.missing -gt 0 -or $sum.stale -gt 0 -or $sum.orphans -gt 0)
+
+    $snapshot.last_run = Read-RunStatus (Get-RunStatusPath (Join-Path (Split-Path -Parent $ConfigPath) 'sync-skills.log'))
+
+    if (-not $snapshot.source_exists) {
+        $snapshot.error = "source dir not found: $src`n        Is CC Switch installed? Set the right path in config.json (source)."
+    } elseif ($snapshot.skill_count -eq 0) {
+        $snapshot.error = "no skills found in source dir: $src (no subfolder contains SKILL.md)"
+    }
+
+    if ($snapshot.error) {
+        $snapshot.health = 'error'
+    } elseif ($sum.issues -gt 0) {
+        $snapshot.health = 'warn'
+    } else {
+        $snapshot.health = 'ok'
+    }
+    return [pscustomobject]$snapshot
 }

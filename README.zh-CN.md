@@ -10,6 +10,7 @@
 - 幂等：已存在的条目一律跳过，**绝不覆盖**各工具自己的 skill
 - 配置化：`config.json` 里自由增删目标工具
 - 可移植：所有路径基于环境变量（`%USERPROFILE%` / `%APPDATA%` / `%HERMES_HOME%`），可在任意电脑使用
+- 本地仪表盘：`启动WebUI.bat` 把同步状态搬进浏览器的一个标签页（见 [Web UI](#web-ui)）
 
 ## 它解决了什么
 
@@ -46,6 +47,9 @@ SkillBridge/
 ├── sync-skills.ps1         # Windows 同步脚本（junction）
 ├── sync-skills.sh          # Unix 同步脚本（symlink）
 ├── check-db-sync.py        # 对比/报告 CC Switch 技能数据库（同步末尾调用）
+├── web-ui.ps1              # 本地仪表盘服务（Windows，仅回环地址）
+├── web-ui.html             # 仪表盘页面，由 web-ui.ps1 提供
+├── 启动WebUI.bat           # 双击即打开仪表盘
 ├── .skillbridge-status.json # 最近一次运行结果（sync-skills.* 写入），不入库
 ├── install-autolink.ps1    # Windows：注册计划任务
 ├── install-autolink.sh     # Unix：注册 launchd / crontab
@@ -84,6 +88,22 @@ chmod +x sync-skills.sh install-autolink.sh detect-tools.sh
 ./sync-skills.sh            # 手动同步
 ./install-autolink.sh       # 注册自启（macOS 登录时 / Linux 开机时）
 ```
+
+## Web UI（本地仪表盘）
+
+仅 Windows（PowerShell）。双击 **`启动WebUI.bat`**：启动服务、自动打开浏览器 `http://localhost:8765/`，用命令行窗口或页面上的 **停止** 按钮关掉它。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\web-ui.ps1                  # 默认 8765 端口
+powershell -NoProfile -ExecutionPolicy Bypass -File .\web-ui.ps1 -Port 9001 -NoBrowser
+```
+
+页面给每个已配置目标一张卡片（找到的 skill 数、新建链接、更新拷贝、剪除死链、失败数），外加 `sync-skills.log` 的尾部，和两个动作：**立即同步**（真正跑一遍 `sync-skills.ps1` 并显示汇总）和 **数据库检查**（跑同步里那套**只报告**的 CC Switch 数据库对比，绝不删行）。每张卡片可以展开看该目标的逐条明细。快照每 15 秒自动刷新一次。
+
+两个值得知道的设计点：
+
+- **它只听本机。** 套接字只绑定 `127.0.0.1`（以及 `::1`），局域网来的连接在 TCP 层就被拒绝。这也是 `web-ui.ps1` 用裸 `TcpListener` 而不是 `HttpListener` 的原因：HTTP.sys 不管你给什么前缀都会为这个端口开一个**通配符**套接字、自己按 `Host` 头路由，所以局域网上一个发 `Host: localhost:8765` 的客户端会被正常服务——连 token 一起给它。`tests/smoke-webui.ps1` 会断言「连本机局域网 IP 必须被拒」，防止这条悄悄退化。
+- **每个 API 调用都带一个本次启动生成的 token**，只写进页面本身。这是防止同一个浏览器里别的网站的 JS 朝仪表盘 POST 一次同步（CSRF）的手段。它证明请求来自你打开的这个页面，而不是来自陌生人——对只监听回环的服务来说正好够用。
 
 ## 配置（config.json）
 

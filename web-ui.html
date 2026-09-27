@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="sb-token" content="__SB_TOKEN__">
+<title>SkillBridge · CC Switch 技能同步</title>
+<style>
+  :root {
+    --bg:        #0b0d12;
+    --bg-glow-1: rgba(79, 209, 197, .10);
+    --bg-glow-2: rgba(96, 165, 250, .07);
+    --surface:   #12151d;
+    --surface-2: #171b25;
+    --surface-3: #1d222e;
+    --border:    #232936;
+    --border-2:  #2e3547;
+    --text:      #e7eaf2;
+    --text-dim:  #aeb6c6;
+    --muted:     #7d869a;
+    --accent:    #4fd1c5;
+    --accent-2:  #38b2ac;
+    --ok:        #34d399;
+    --warn:      #fbbf24;
+    --fail:      #fb7185;
+    --info:      #60a5fa;
+    --mono:      "Cascadia Mono", "JetBrains Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+    --sans:      "Segoe UI", system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB",
+                 "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    --radius:    14px;
+    --shadow:    0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background:
+      radial-gradient(1100px 520px at 12% -10%, var(--bg-glow-1), transparent 60%),
+      radial-gradient(900px 480px at 95% 0%, var(--bg-glow-2), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  a { color: var(--accent); }
+
+  /* ------------------------------------------------------------- top bar */
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 22px;
+    background: rgba(11,13,18,.72);
+    backdrop-filter: blur(14px) saturate(140%);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .brand svg { flex: none; }
+  .brand-title { font-weight: 650; font-size: 15px; letter-spacing: .2px; }
+  .brand-sub { color: var(--muted); font-size: 12px; margin-top: -2px; }
+  .topbar-spacer { flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 12px 5px 10px; border-radius: 999px;
+    font-size: 12.5px; font-weight: 600; white-space: nowrap;
+    border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text-dim);
+  }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+  .pill.ok    { color: var(--ok);   border-color: rgba(52,211,153,.35);  background: rgba(52,211,153,.08); }
+  .pill.warn  { color: var(--warn); border-color: rgba(251,191,36,.35);  background: rgba(251,191,36,.08); }
+  .pill.fail  { color: var(--fail); border-color: rgba(251,113,133,.35); background: rgba(251,113,133,.08); }
+  .pill.info  { color: var(--info); border-color: rgba(96,165,250,.35);  background: rgba(96,165,250,.08); }
+  .pill.warn .dot, .pill.fail .dot { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.82); } }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 13px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text-dim);
+    font: inherit; font-size: 13px; font-weight: 550;
+    transition: background .15s, color .15s, border-color .15s, transform .06s;
+  }
+  .btn:hover { background: var(--surface-3); color: var(--text); border-color: #3a4459; }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: .5; cursor: default; transform: none; }
+  .btn.primary {
+    background: linear-gradient(180deg, rgba(79,209,197,.20), rgba(79,209,197,.10));
+    border-color: rgba(79,209,197,.45); color: #b8f4ee;
+  }
+  .btn.primary:hover { background: linear-gradient(180deg, rgba(79,209,197,.30), rgba(79,209,197,.16)); color: #dffbf7; }
+  .btn.danger:hover { border-color: rgba(251,113,133,.5); color: var(--fail); }
+  .btn svg { flex: none; }
+  .btn .spin { display: none; }
+  .btn.busy .spin { display: block; animation: rot .9s linear infinite; }
+  .btn.busy .icon { display: none; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  /* -------------------------------------------------------------- layout */
+  main { max-width: 1360px; margin: 0 auto; padding: 26px 22px 60px; }
+  .section-head {
+    display: flex; align-items: baseline; gap: 10px;
+    margin: 30px 2px 14px;
+  }
+  .section-head h2 { font-size: 13px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  .section-head .hint { font-size: 12px; color: var(--muted); }
+
+  .card {
+    background: linear-gradient(180deg, var(--surface), var(--surface-2));
+    border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+
+  /* ----------------------------------------------------------------- hero */
+  .hero { padding: 20px 22px; display: flex; flex-wrap: wrap; gap: 18px 26px; align-items: flex-start; }
+  .hero-main { min-width: 260px; flex: 1 1 320px; }
+  .hero-state { font-size: 26px; font-weight: 700; letter-spacing: .2px; display: flex; align-items: center; gap: 12px; }
+  .hero-state .ring { width: 12px; height: 12px; border-radius: 50%; flex: none; box-shadow: 0 0 0 4px rgba(52,211,153,.12); }
+  .hero-state.ok   .ring { background: var(--ok); }
+  .hero-state.warn .ring { background: var(--warn); box-shadow: 0 0 0 4px rgba(251,191,36,.12); }
+  .hero-state.fail .ring { background: var(--fail); box-shadow: 0 0 0 4px rgba(251,113,133,.12); }
+  .hero-sub { color: var(--text-dim); margin-top: 6px; }
+  .hero-side { flex: 1 1 420px; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 18px; }
+  .kv { min-width: 0; }
+  .kv .k { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+  .kv .v { font-family: var(--mono); font-size: 12.5px; color: var(--text); word-break: break-all; }
+  .kv .v.plain { font-family: var(--sans); }
+
+  .banner {
+    margin: 0 0 16px; padding: 11px 14px; border-radius: 12px;
+    border: 1px solid rgba(251,113,133,.4); background: rgba(251,113,133,.09);
+    color: #ffd9de; font-size: 13px;
+  }
+  .banner.info { border-color: rgba(96,165,250,.35); background: rgba(96,165,250,.09); color: #d5e6ff; }
+  .banner code { font-family: var(--mono); font-size: 12px; }
+
+  /* ---------------------------------------------------------------- stats */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 12px; }
+  .stat { padding: 14px 16px 13px; border-radius: var(--radius); position: relative; overflow: hidden; }
+  .stat::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 2px;
+    background: linear-gradient(90deg, var(--accent), transparent 70%); opacity: .55;
+  }
+  .stat.warn::before  { background: linear-gradient(90deg, var(--warn), transparent 70%); }
+  .stat.fail::before  { background: linear-gradient(90deg, var(--fail), transparent 70%); }
+  .stat .label { font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+  .stat .value { font-size: 27px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; margin-top: 4px; }
+  .stat .note { font-size: 12px; color: var(--text-dim); margin-top: 2px; min-height: 18px; }
+  .stat.ok   .value { color: var(--ok); }
+  .stat.warn .value { color: var(--warn); }
+  .stat.fail .value { color: var(--fail); }
+
+  /* ------------------------------------------------------------- targets */
+  .targets { display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 12px; }
+  .target {
+    padding: 14px 15px 13px; cursor: pointer; position: relative;
+    transition: border-color .15s, transform .12s, background .15s;
+  }
+  .target:hover { border-color: var(--border-2); transform: translateY(-1px); }
+  .target.open { border-color: rgba(79,209,197,.4); }
+  .target.has-issues { border-left: 2px solid var(--warn); }
+  .target.missing-dir { border-style: dashed; }
+  .target-head { display: flex; align-items: center; gap: 8px; }
+  .target-name { font-weight: 620; font-size: 14.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2.5px 7px; border-radius: 6px; flex: none;
+    border: 1px solid var(--border-2); color: var(--muted); background: var(--surface-3);
+  }
+  .badge.junction { color: #7fd8cf; border-color: rgba(79,209,197,.35); background: rgba(79,209,197,.1); }
+  .badge.copy     { color: #9ec1ff; border-color: rgba(96,165,250,.35); background: rgba(96,165,250,.1); }
+  .target-path {
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    margin-top: 6px; word-break: break-all;
+  }
+  .bar { height: 5px; border-radius: 99px; background: var(--surface-3); margin-top: 10px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent-2), var(--accent)); transition: width .5s cubic-bezier(.4,0,.2,1); }
+  .bar.partial > i { background: linear-gradient(90deg, #b98a1e, var(--warn)); }
+  .target-foot { display: flex; align-items: baseline; gap: 10px; margin-top: 9px; flex-wrap: wrap; }
+  .target-count { font-size: 13px; font-variant-numeric: tabular-nums; }
+  .target-count b { font-size: 15px; font-weight: 700; }
+  .target-flags { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .flag {
+    font-size: 11px; padding: 1.5px 7px; border-radius: 99px; white-space: nowrap;
+    border: 1px solid var(--border-2); color: var(--text-dim); background: var(--surface-3);
+  }
+  .flag.warn  { color: var(--warn); border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.08); }
+  .flag.fail  { color: var(--fail); border-color: rgba(251,113,133,.35); background: rgba(251,113,133,.08); }
+  .flag.ok    { color: var(--ok);   border-color: rgba(52,211,153,.3);  background: rgba(52,211,153,.08); }
+
+  .detail { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border-2); }
+  .target.open .detail { display: block; }
+  .detail h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 650; }
+  .detail h4 .n { color: var(--text-dim); }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+  .chip {
+    font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 6px;
+    background: var(--surface-3); border: 1px solid var(--border); color: var(--text-dim);
+  }
+  .chip.more { color: var(--muted); font-style: italic; }
+  .chip.hot { color: #ffd9de; border-color: rgba(251,113,133,.4); background: rgba(251,113,133,.1); }
+  .detail ul.issues { margin: 0; padding-left: 18px; color: var(--text-dim); font-size: 12.5px; }
+  .detail ul.issues li { margin-bottom: 3px; }
+  .detail-empty { color: var(--muted); font-size: 12.5px; }
+
+  /* -------------------------------------------------------------- panels */
+  .panels { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; }
+  @media (max-width: 900px) { .panels { grid-template-columns: 1fr; } }
+  .panel { padding: 16px 18px; min-width: 0; }
+  .panel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .panel-head h3 { margin: 0; font-size: 14px; font-weight: 650; }
+  .panel-head .sub { color: var(--muted); font-size: 12px; }
+  pre.out {
+    margin: 0; padding: 12px 14px; border-radius: 10px; max-height: 330px; overflow: auto;
+    background: #0d1016; border: 1px solid var(--border);
+    font-family: var(--mono); font-size: 11.8px; line-height: 1.65; color: var(--text-dim);
+    white-space: pre-wrap; word-break: break-word;
+  }
+  pre.out .ln-err { color: #ffb3bd; }
+  pre.out .ln-ok  { color: #9ff0d8; }
+  pre.out .ln-warn{ color: #ffdf9e; }
+  .panel-foot { margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .panel-foot .grow { flex: 1; }
+
+  .switch { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-dim); cursor: pointer; user-select: none; }
+  .switch input { accent-color: var(--accent-2); width: 15px; height: 15px; cursor: pointer; }
+
+  /* --------------------------------------------------------------- misc */
+  .progressbar { position: fixed; top: 0; left: 0; height: 2px; width: 0; z-index: 50;
+    background: linear-gradient(90deg, var(--accent), var(--info)); box-shadow: 0 0 10px rgba(79,209,197,.6);
+    transition: width .25s ease, opacity .3s; opacity: 0; }
+  .progressbar.on { opacity: 1; }
+
+  footer { max-width: 1360px; margin: 0 auto; padding: 0 22px 40px; color: var(--muted); font-size: 12px; }
+  footer p { margin: 4px 0; }
+  footer code { font-family: var(--mono); color: var(--text-dim); }
+
+  .toasts { position: fixed; right: 18px; bottom: 18px; z-index: 60; display: flex; flex-direction: column; gap: 8px; max-width: min(420px, calc(100vw - 36px)); }
+  .toast {
+    padding: 11px 14px; border-radius: 12px; border: 1px solid var(--border-2);
+    background: rgba(23,27,37,.96); box-shadow: var(--shadow); color: var(--text);
+    font-size: 13px; animation: toastin .22s ease; backdrop-filter: blur(8px);
+  }
+  .toast.ok   { border-color: rgba(52,211,153,.45); }
+  .toast.warn { border-color: rgba(251,191,36,.45); }
+  .toast.fail { border-color: rgba(251,113,133,.45); }
+  .toast .t { font-weight: 650; margin-bottom: 2px; display: flex; align-items: center; gap: 7px; }
+  .toast.ok .t   { color: var(--ok); }
+  .toast.warn .t { color: var(--warn); }
+  .toast.fail .t { color: var(--fail); }
+  .toast .d { color: var(--text-dim); font-size: 12.5px; white-space: pre-wrap; }
+  @keyframes toastin { from { opacity: 0; transform: translateY(8px); } }
+
+  .skeleton { color: var(--muted); padding: 40px 0; text-align: center; }
+  .spinner { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--border-2); border-top-color: var(--accent); animation: rot .8s linear infinite; display: inline-block; vertical-align: -3px; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-logo" viewBox="0 0 24 24">
+      <path d="M4 17h6a4 4 0 0 0 0-8H8a4 4 0 0 1 0-8h9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M4 21h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" opacity=".45"/>
+      <circle cx="17" cy="9" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/>
+    </symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24">
+      <path d="M20 11A8 8 0 0 0 6.3 6.3L4 8.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+      <path d="M4 4v4.5h4.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M4 13a8 8 0 0 0 13.7 4.7L20 15.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+      <path d="M20 20v-4.5h-4.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-sync" viewBox="0 0 24 24">
+      <path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+      <path d="M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-db" viewBox="0 0 24 24">
+      <ellipse cx="12" cy="6" rx="7" ry="3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" fill="none" stroke="currentColor" stroke-width="1.8"/>
+    </symbol>
+    <symbol id="i-power" viewBox="0 0 24 24">
+      <path d="M12 3v9" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+      <path d="M7.5 6.5a7 7 0 1 0 9 0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-log" viewBox="0 0 24 24">
+      <path d="M6 4h9l3 3v13H6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="M9 11h6M9 15h4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v4.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.15" fill="currentColor"/></symbol>
+    <symbol id="i-spin" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+
+<div class="progressbar" id="progress"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <svg width="30" height="30" viewBox="0 0 24 24" style="color: var(--accent)"><use href="#i-logo"/></svg>
+    <div>
+      <div class="brand-title">SkillBridge</div>
+      <div class="brand-sub">CC Switch 技能同步控制台</div>
+    </div>
+  </div>
+  <span class="pill" id="pill-run"><span class="dot"></span><span id="pill-run-text">读取中…</span></span>
+  <div class="topbar-spacer"></div>
+  <button class="btn" id="btn-refresh" title="重新读取状态"><svg class="icon" width="15" height="15" viewBox="0 0 24 24"><use href="#i-refresh"/></svg><svg class="spin" width="15" height="15" viewBox="0 0 24 24"><use href="#i-spin"/></svg>刷新</button>
+  <button class="btn primary" id="btn-sync" title="立即执行一次同步"><svg class="icon" width="15" height="15" viewBox="0 0 24 24"><use href="#i-sync"/></svg><svg class="spin" width="15" height="15" viewBox="0 0 24 24"><use href="#i-spin"/></svg>立即同步</button>
+  <button class="btn danger" id="btn-stop" title="停止本服务并关闭"><svg width="15" height="15" viewBox="0 0 24 24"><use href="#i-power"/></svg>停止</button>
+</header>
+
+<main>
+  <div id="banner"></div>
+
+  <section class="card hero" id="hero">
+    <div class="hero-main">
+      <div class="hero-state" id="hero-state"><span class="ring"></span><span id="hero-state-text">读取中…</span></div>
+      <div class="hero-sub" id="hero-sub">&nbsp;</div>
+    </div>
+    <div class="hero-side" id="hero-kv"></div>
+  </section>
+
+  <div class="section-head"><h2>总览</h2><span class="hint" id="overview-hint"></span></div>
+  <section class="stats" id="stats"></section>
+
+  <div class="section-head"><h2>同步目标</h2><span class="hint">点击任意卡片查看明细（缺失 / 残留 / 工具自有 / 冲突）</span></div>
+  <section class="targets" id="targets"></section>
+
+  <div class="section-head"><h2>数据库与日志</h2><span class="hint">check-db-sync.py 只报告，不修改 CC Switch 数据库</span></div>
+  <section class="panels">
+    <div class="card panel">
+      <div class="panel-head">
+        <svg width="18" height="18" viewBox="0 0 24 24" style="color: var(--accent)"><use href="#i-db"/></svg>
+        <h3>数据库一致性</h3>
+        <span class="sub" id="db-sub">CC Switch 的 skills 表 vs 技能文件夹</span>
+      </div>
+      <pre class="out" id="db-out">尚未检查。点击「检查数据库」开始。</pre>
+      <div class="panel-foot">
+        <button class="btn" id="btn-db"><svg class="icon" width="15" height="15" viewBox="0 0 24 24"><use href="#i-db"/></svg><svg class="spin" width="15" height="15" viewBox="0 0 24 24"><use href="#i-spin"/></svg>检查数据库</button>
+        <span class="sub" id="db-note"></span>
+      </div>
+    </div>
+
+    <div class="card panel">
+      <div class="panel-head">
+        <svg width="18" height="18" viewBox="0 0 24 24" style="color: var(--info)"><use href="#i-log"/></svg>
+        <h3>同步日志</h3>
+        <span class="sub" id="log-sub"></span>
+      </div>
+      <pre class="out" id="log-out">加载中…</pre>
+      <div class="panel-foot">
+        <button class="btn" id="btn-log"><svg class="icon" width="15" height="15" viewBox="0 0 24 24"><use href="#i-refresh"/></svg><svg class="spin" width="15" height="15" viewBox="0 0 24 24"><use href="#i-spin"/></svg>刷新日志</button>
+        <label class="switch"><input type="checkbox" id="auto-refresh"> 每 15 秒自动刷新状态</label>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p>本页面由 <code>web-ui.ps1</code> 在 <b>本机回环地址</b>（127.0.0.1）上提供，外部网络无法访问；所有操作请求都需携带本页一次性令牌，其他网站无法调用。</p>
+  <p>同步采用「只认归属」的原则：只有带 <code>.skillbridge-copy</code> 标记或指向源目录的链接才会被创建、刷新或剪除，工具自己的技能目录永不改动。</p>
+</footer>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+(function () {
+  'use strict';
+  var TOKEN = (document.querySelector('meta[name="sb-token"]') || {}).content || '';
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { snapshot: null, logTotal: 0 };
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function num(n) { return (n == null ? 0 : n).toLocaleString('zh-CN'); }
+  function icon(id, size) {
+    return '<svg width="' + (size || 14) + '" height="' + (size || 14) + '" viewBox="0 0 24 24"><use href="#' + id + '"/></svg>';
+  }
+
+  function progress(on) {
+    var el = $('progress');
+    if (on) { el.classList.add('on'); el.style.width = '72%'; }
+    else { el.style.width = '100%'; setTimeout(function () { el.classList.remove('on'); el.style.width = '0'; }, 220); }
+  }
+
+  function api(path, opts) {
+    opts = opts || {};
+    var headers = { 'X-SB-Token': TOKEN };
+    var body = undefined;
+    if (opts.method === 'POST' || opts.method === 'PUT') {
+      // Always send a body: HttpListener (HTTP.sys) answers 411 to a POST that
+      // carries neither a Content-Length nor chunked encoding.
+      body = JSON.stringify(opts.body === undefined ? {} : opts.body);
+      headers['Content-Type'] = 'application/json';
+    }
+    return fetch(path, {
+      method: opts.method || 'GET',
+      headers: headers,
+      body: body
+    }).then(function (res) {
+      if (res.status === 403) throw new Error('令牌校验失败：本页面的服务端可能已重启，请重新打开页面。');
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        if (!res.ok && data && data.error) throw new Error(data.error);
+        return data;
+      });
+    });
+  }
+
+  function toast(kind, title, detail) {
+    var wrap = $('toasts');
+    var el = document.createElement('div');
+    el.className = 'toast ' + kind;
+    el.innerHTML = '<div class="t">' + icon(kind === 'ok' ? 'i-check' : 'i-alert', 15) + esc(title) + '</div>' +
+                   (detail ? '<div class="d">' + esc(detail) + '</div>' : '');
+    wrap.appendChild(el);
+    setTimeout(function () { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; }, 6000);
+    setTimeout(function () { el.remove(); }, 6400);
+  }
+
+  function busy(btn, on) { if (btn) btn.classList.toggle('busy', !!on); if (btn) btn.disabled = !!on; }
+
+  function banner(html) { $('banner').innerHTML = html || ''; }
+
+  /* ------------------------------------------------------------- render */
+  function renderRunPill(s) {
+    var pill = $('pill-run'), text = $('pill-run-text');
+    var run = s.last_run;
+    if (!run) { pill.className = 'pill info'; text.textContent = '尚未同步过'; return; }
+    if (run.status === 'fail') { pill.className = 'pill fail'; text.textContent = '上次同步失败 · ' + run.at; }
+    else if (run.status === 'warn') { pill.className = 'pill warn'; text.textContent = '上次同步有告警 · ' + run.at; }
+    else { pill.className = 'pill ok'; text.textContent = '上次同步正常 · ' + run.at; }
+  }
+
+  function renderHero(s) {
+    var box = $('hero-state');
+    box.className = 'hero-state ' + (s.health === 'error' ? 'fail' : s.health);
+    var t = $('hero-state-text');
+    if (s.error) { t.textContent = '配置或源目录有问题'; }
+    else if (s.health === 'warn') { t.textContent = '基本可用，但有需要处理的项目'; }
+    else { t.textContent = '一切正常'; }
+
+    var sub = [];
+    if (s.needs_sync) sub.push('有待同步的内容');
+    if (s.totals && s.totals.issues) sub.push(s.totals.issues + ' 项提示');
+    $('hero-sub').textContent = sub.length ? sub.join(' · ') : '所有目标都与源目录保持一致';
+
+    var kv = [
+      ['源目录', s.source || '（未设置）', 1],
+      ['技能数', s.skill_count + ' 个', 0],
+      ['链接方式', s.link_type === 'symlink' ? 'symlink（符号链接）' : 'junction（目录联接）', 0],
+      ['数据库检查', s.check_db ? '开启（只报告）' : '关闭', 0],
+      ['计划任务', s.autolink && s.autolink.enabled ? '启用' : '未启用（手动模式）', 0],
+      ['快照时间', s.generated_at, 0]
+    ];
+    $('hero-kv').innerHTML = kv.map(function (r) {
+      return '<div class="kv"><div class="k">' + esc(r[0]) + '</div><div class="v' + (r[2] ? '' : ' plain') + '">' + esc(r[1]) + '</div></div>';
+    }).join('');
+  }
+
+  function statCard(label, value, note, cls) {
+    return '<div class="card stat ' + (cls || '') + '"><div class="label">' + esc(label) + '</div>' +
+           '<div class="value">' + esc(value) + '</div><div class="note">' + esc(note || '') + '</div></div>';
+  }
+
+  function renderStats(s) {
+    var t = s.totals || {};
+    var html = '';
+    html += statCard('源技能', num(s.skill_count), 'CC Switch skills 目录');
+    html += statCard('已链接', num(t.linked || 0), (t.targets - 1) + ' 个联接目标 × ' + s.skill_count, t.linked ? '' : 'warn');
+    html += statCard('已复制', num(t.copied || 0), t.stale ? num(t.stale) + ' 个内容已过期' : 'copy 模式目标', t.stale ? 'warn' : '');
+    html += statCard('待同步', num(t.missing || 0), t.missing ? '运行同步即可补齐' : '无遗漏', t.missing ? 'warn' : 'ok');
+    html += statCard('需注意', num(t.issues || 0), t.dead ? num(t.dead) + ' 个失效链接' : '死链 / 残留 / 冲突', t.issues ? 'warn' : 'ok');
+    html += statCard('工具自有', num(t.foreign || 0), '不被同步改动', 'ok');
+    $('stats').innerHTML = html;
+    $('overview-hint').textContent = s.error ? s.error.split('\n')[0] : '';
+  }
+
+  function chipList(names, hot, limit) {
+    if (!names || !names.length) return '';
+    var out = names.slice(0, limit || 40).map(function (n) {
+      return '<span class="chip' + (hot ? ' hot' : '') + '">' + esc(n) + '</span>';
+    }).join('');
+    if (names.length > (limit || 40)) {
+      out += '<span class="chip more">…等 ' + names.length + ' 个</span>';
+    }
+    return out;
+  }
+
+  function renderTargets(s) {
+    var wrap = $('targets');
+    var total = s.skill_count || 0;
+    if (!s.targets || !s.targets.length) {
+      wrap.innerHTML = '<div class="card" style="padding:30px;text-align:center;color:var(--muted)">config.json 里还没有配置任何同步目标。</div>';
+      return;
+    }
+    wrap.innerHTML = s.targets.map(function (t, i) {
+      var done = t.linked + t.copied;
+      var pct = total ? Math.round(done / total * 100) : 0;
+      var missing = t.missing || [], orphans = t.orphans || [], dead = t.dead || [],
+          foreign = t.foreign || [], shadowed = t.shadowed || [], issues = t.issues || [];
+      var flags = '';
+      if (!t.exists) flags += '<span class="flag warn">目录不存在</span>';
+      if (missing.length) flags += '<span class="flag warn">缺 ' + missing.length + '</span>';
+      if (t.stale) flags += '<span class="flag warn">过期 ' + t.stale + '</span>';
+      if (orphans.length) flags += '<span class="flag fail">残留 ' + orphans.length + '</span>';
+      if (dead.length) flags += '<span class="flag fail">死链 ' + dead.length + '</span>';
+      if (shadowed.length) flags += '<span class="flag fail">同名冲突 ' + shadowed.length + '</span>';
+      if (foreign.length) flags += '<span class="flag" title="工具自己的技能目录，同步不会改动">自有 ' + foreign.length + '</span>';
+
+      var detail = '';
+      detail += '<h4>缺失的源技能 <span class="n">' + missing.length + '</span></h4>';
+      detail += (chipList(missing, false) || '<div class="detail-empty">无 — 该目标已包含全部源技能。</div>');
+      detail += '<h4>我们留下、但源技能已删除 <span class="n">' + orphans.length + '</span></h4>';
+      detail += (chipList(orphans, true) || '<div class="detail-empty">无。</div>');
+      detail += '<h4>不是我们的失效链接 <span class="n">' + dead.length + '</span></h4>';
+      detail += (chipList(dead, false) || '<div class="detail-empty">无。</div>');
+      detail += '<h4>工具自己的技能 <span class="n">' + foreign.length + '</span></h4>';
+      detail += (chipList(foreign, false, 60) || '<div class="detail-empty">无。</div>');
+      if (issues.length) {
+        detail += '<h4>提示 <span class="n">' + issues.length + '</span></h4><ul class="issues">' +
+          issues.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
+      }
+
+      return '<div class="card target' + (issues.length ? ' has-issues' : '') + (!t.exists ? ' missing-dir' : '') + '" data-i="' + i + '">' +
+        '<div class="target-head"><span class="target-name">' + esc(t.name) + '</span>' +
+        '<span class="badge ' + t.mode + '">' + esc(t.mode) + '</span></div>' +
+        '<div class="target-path">' + esc(t.resolved_path || t.path || '') + '</div>' +
+        '<div class="bar' + (pct < 100 ? ' partial' : '') + '"><i style="width:' + pct + '%"></i></div>' +
+        '<div class="target-foot"><span class="target-count"><b>' + num(done) + '</b> / ' + num(total) + '</span>' +
+        '<div class="target-flags">' + flags + '</div></div>' +
+        '<div class="detail">' + detail + '</div>' +
+        '</div>';
+    }).join('');
+
+    Array.prototype.forEach.call(wrap.querySelectorAll('.target'), function (el) {
+      el.addEventListener('click', function () { el.classList.toggle('open'); });
+    });
+  }
+
+  function classifyLogLine(line) {
+    if (/FAIL|error|ERROR|\[!\]|\[error\]|DRIFT/.test(line)) return 'ln-err';
+    if (/WARN|WARNING|注意|警告/.test(line)) return 'ln-warn';
+    if (/^OK|in sync/.test(line)) return 'ln-ok';
+    return '';
+  }
+
+  function renderLog(data) {
+    if (!data || !data.exists) { $('log-out').textContent = '还没有 sync-skills.log。'; $('log-sub').textContent = ''; return; }
+    state.logTotal = data.total;
+    $('log-sub').textContent = data.total + ' 行 · 显示最后 ' + (data.lines || []).length + ' 行';
+    $('log-out').innerHTML = (data.lines || []).map(function (l) {
+      return '<span class="' + classifyLogLine(l) + '">' + esc(l) + '</span>';
+    }).join('\n');
+    $('log-out').scrollTop = $('log-out').scrollHeight;
+  }
+
+  function renderDbCheck(data) {
+    var out = $('db-out');
+    if (!data.ran) { out.innerHTML = '<span class="ln-warn">' + esc(data.error || '未能执行检查') + '</span>'; return; }
+    out.innerHTML = (data.output || '').split('\n').map(function (l) {
+      return '<span class="' + classifyLogLine(l) + '">' + esc(l) + '</span>';
+    }).join('\n');
+    $('db-note').textContent = data.ok ? '数据库与文件夹一致' : '发现漂移 — 请阅读上面内容后再决定是否手动修复';
+  }
+
+  /* ------------------------------------------------------------ actions */
+  function refresh() {
+    progress(true);
+    return api('/api/status').then(function (s) {
+      state.snapshot = s;
+      renderRunPill(s);
+      renderHero(s);
+      renderStats(s);
+      renderTargets(s);
+      var b = [];
+      if (s.error) b.push('<div class="banner"><b>无法开始同步：</b><br>' + esc(s.error).replace(/\n/g, '<br>') + '</div>');
+      else if (s.needs_sync) b.push('<div class="banner info">有 ' + num((s.totals.missing || 0) + (s.totals.stale || 0)) + ' 个技能待同步/待刷新，点击右上角「立即同步」补齐。</div>');
+      banner(b.join(''));
+      return api('/api/log?lines=200').then(renderLog).catch(function () {});
+    }).catch(function (e) {
+      banner('<div class="banner"><b>读取状态失败：</b> ' + esc(e.message) + '<br>如果刚刚点击了「停止」，请直接关闭此窗口。</div>');
+      $('hero-state-text').textContent = '无法连接到服务';
+    }).then(function () { progress(false); });
+  }
+
+  function runSync() {
+    var btn = $('btn-sync');
+    busy(btn, true);
+    progress(true);
+    return api('/api/sync', { method: 'POST' }).then(function (r) {
+      var lines = (r.output || '').split('\n').filter(Boolean);
+      var last = lines[lines.length - 1] || '';
+      if (r.ok) { toast('ok', '同步完成', last); }
+      else { toast('fail', '同步失败（退出码 ' + r.exit_code + '）', lines.slice(-6).join('\n')); }
+      return refresh();
+    }).catch(function (e) {
+      toast('fail', '无法执行同步', e.message);
+    }).then(function () { busy(btn, false); progress(false); });
+  }
+
+  function runDbCheck() {
+    var btn = $('btn-db');
+    busy(btn, true);
+    return api('/api/db-check', { method: 'POST' }).then(function (r) {
+      renderDbCheck(r);
+      if (r.ran && !r.ok) toast('warn', '数据库与技能文件夹不一致', '详情见左侧输出；修复需手动执行 python check-db-sync.py --fix');
+    }).catch(function (e) { toast('fail', '数据库检查失败', e.message); })
+      .then(function () { busy(btn, false); });
+  }
+
+  $('btn-refresh').addEventListener('click', refresh);
+  $('btn-sync').addEventListener('click', runSync);
+  $('btn-db').addEventListener('click', runDbCheck);
+  $('btn-log').addEventListener('click', function () {
+    var b = this; busy(b, true);
+    api('/api/log?lines=200').then(renderLog).catch(function (e) { toast('fail', '读取日志失败', e.message); })
+      .then(function () { busy(b, false); });
+  });
+  $('btn-stop').addEventListener('click', function () {
+    api('/api/stop', { method: 'POST' }).catch(function () {}).then(function () {
+      banner('<div class="banner info">服务已停止，可以关闭这个标签页和命令行窗口了。</div>');
+      toast('ok', '服务已停止');
+    });
+  });
+
+  var timer = null;
+  $('auto-refresh').addEventListener('change', function () {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (this.checked) { timer = setInterval(refresh, 15000); }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+    if (e.key === 'r' || e.key === 'R') { refresh(); }
+    if (e.key === 's' || e.key === 'S') { runSync(); }
+  });
+
+  refresh();
+})();
+</script>
+</body>
+</html>

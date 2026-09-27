@@ -197,9 +197,14 @@ foreach ($t in $targetList) {
     $tdir = Resolve-TargetPath $t.Path
     if (-not (Test-Path $tdir)) { continue }
     foreach ($item in @(Get-ChildItem -Path $tdir -Force -ErrorAction SilentlyContinue)) {
-        # Only links are ours to remove; a real folder belongs to the tool.
+        # Only links are candidates; a real folder always belongs to the tool.
         # pwsh sometimes leaves LinkType empty on junctions — Attributes is reliable.
         if (-not (Test-ReparsePoint $item)) { continue }
+        # A link is not ours just because it is dead. Only a link INTO THE
+        # SOURCE is (the same ownership rule every other deletion here uses);
+        # a dangling link pointing elsewhere belongs to the user — an
+        # unmounted drive, a shortcut into another tool — and must survive.
+        if (-not (Test-OurSkillEntry $item $src)) { continue }
         # Test-Path on the link itself does NOT resolve its target for junctions,
         # so check the recorded target path instead. An unreadable target is left
         # alone: keeping a dead link beats deleting a live one.

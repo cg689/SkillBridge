@@ -456,6 +456,12 @@ if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
         [ -d "$tdir" ] || continue
         while IFS= read -r -d '' link; do
             if [ -L "$link" ]; then
+                # A link is not ours just because it is dead. Only a link INTO
+                # THE SOURCE is (the same rule is_our_entry uses everywhere
+                # else); a dangling link pointing elsewhere belongs to the user
+                # — an unmounted drive, a shortcut into another tool — and must
+                # survive. Mirrors the ownership guard in sync-skills.ps1.
+                is_our_link "$link" || continue
                 target="$(readlink "$link")"
                 case "$target" in
                     /*) abs="$target" ;;
