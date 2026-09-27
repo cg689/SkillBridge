@@ -436,13 +436,170 @@ function Show-StatusToast {
     }
 }
 
+function Get-SkillFrontMatter {
+    param([string]$Path)
+    # SKILL.md opens with a YAML block: `---` at the top, then `name:` and
+    # `description:`, then `---` again. The description is usually a folded
+    # scalar (`>-` with the text on the indented lines underneath), so reading
+    # only the `description:` line loses most of it. Only these two fields are
+    # ever wanted, so they are parsed by hand rather than by a YAML parser.
+    $empty = [pscustomobject]@{ name = ''; description = '' }
+    try {
+        $lines = [IO.File]::ReadAllLines($Path, [Text.Encoding]::UTF8)
+    } catch {
+        return $empty
+    }
+    if ($lines.Count -lt 3 -or $lines[0].Trim() -ne '---') { return $empty }
+
+    $block = New-Object 'System.Collections.Generic.List[string]'
+    for ($i = 1; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Trim() -eq '---') { break }
+        $block.Add($lines[$i])
+    }
+
+    $name = ''
+    $description = ''
+    for ($i = 0; $i -lt $block.Count; $i++) {
+        $line = $block[$i]
+        if ($line -match '^name:\s*(.*)$') {
+            $name = $Matches[1].Trim().Trim('"', "'")
+            continue
+        }
+        if ($line -notmatch '^description:\s*(.*)$') { continue }
+        $head = $Matches[1].Trim()
+        if ($head -match '^[>|][+-]?$') {
+            $parts = New-Object 'System.Collections.Generic.List[string]'
+            for ($j = $i + 1; $j -lt $block.Count; $j++) {
+                if ($block[$j].Trim() -eq '') { continue }
+                # Anything not indented belongs to the next key.
+                if (-not ($block[$j].StartsWith(' ') -or $block[$j].StartsWith("`t"))) { break }
+                $parts.Add($block[$j].Trim())
+            }
+            $description = ($parts -join ' ')
+        } else {
+            $description = $head.Trim('"', "'")
+        }
+    }
+    # A folded block keeps its line breaks as single spaces; collapse whatever
+    # is left so the UI never renders a raw newline inside a one-line row.
+    $description = ($description -replace '\s+', ' ').Trim()
+    return [pscustomobject]@{ name = $name; description = $description }
+}
+
+function Get-SkillBridgeSkills {
+    param(
+        [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json')
+    )
+    # The per-skill view behind the dashboard's skill browser: what a skill is
+    # (name, description, how many files, how big, when it last changed) and
+    # where it landed (link or copy, per target). Deliberately separate from
+    # Get-SkillBridgeStatus: this reads 100+ SKILL.md files and walks every
+    # skill folder, which is far more work than the 15-second snapshot should
+    # pay for. The UI asks for it when the browser is opened, not every poll.
+    $result = [ordered]@{
+        generated_at  = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        source        = ''
+        source_exists = $false
+        count         = 0
+        targets       = @()
+        skills        = @()
+        error         = ''
+    }
+
+    $snapshot = Get-SkillBridgeStatus -ConfigPath $ConfigPath -SkipFingerprints -IncludeSyncMap
+    $result.source        = $snapshot.source
+    $result.source_exists = $snapshot.source_exists
+    # Just enough per target for the skill rows to explain the coverage numbers.
+    $result.targets       = @($snapshot.targets | ForEach-Object {
+        [pscustomobject]@{ name = $_.name; mode = $_.mode; exists = $_.exists }
+    })
+    if ($snapshot.error) {
+        $result.error = $snapshot.error
+        return [pscustomobject]$result
+    }
+
+    $src = $snapshot.source
+    # Same two rules as sync-skills.ps1: `_archived/` is not a skill, and a
+    # folder without SKILL.md is not one either.
+    $skillDirs = @(Get-ChildItem -LiteralPath $src -Directory -ErrorAction SilentlyContinue |
+        Where-Object {
+            -not $_.Name.StartsWith('_') -and (Test-Path (Join-Path $_.FullName 'SKILL.md'))
+        } | Sort-Object Name)
+
+    $skills = @()
+    foreach ($dir in $skillDirs) {
+        # A reparse point here would be a link into somewhere else; counting the
+        # files behind it would report the wrong size and could loop.
+        $files = @(Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -Force -ErrorAction SilentlyContinue |
+            Where-Object { -not (Test-ReparsePoint $_) })
+        $size = [long]0
+        $modified = $null
+        foreach ($f in $files) {
+            $size += [long]$f.Length
+            if ($null -eq $modified -or $f.LastWriteTime -gt $modified) { $modified = $f.LastWriteTime }
+        }
+        $meta = Get-SkillFrontMatter (Join-Path $dir.FullName 'SKILL.md')
+
+        # `has` maps target name -> what is actually on disk there ("link" or
+        # "copy"); the mode the config asks for comes from result.targets, and
+        # the two disagreeing (a link left inside a copy target) is exactly the
+        # drift the sync repairs, so a row has to be able to show it.
+        # Plain arrays and hashtables on purpose: PowerShell 5.1 cannot bind a
+        # List[object] into an object property (ArgumentException at runtime, with
+        # nothing in the message pointing back here).
+        $has = @{}
+        $missing = @()
+        $blocked = @()
+        foreach ($t in $snapshot.targets) {
+            $kind = $null
+            if ($t.sync_map -and $t.sync_map.ContainsKey($dir.Name)) {
+                $kind = [string]$t.sync_map[$dir.Name]
+            }
+            if ($kind) {
+                # `kind` is what is actually on disk, `mode` what the config asks
+                # for: a link inside a copy target is exactly the drift the sync
+                # fixes, and the row should say so.
+                $has[$t.name] = $kind
+            } elseif (@($t.shadowed) -contains $dir.Name) {
+                # The tool ships its own folder under this name, so the sync will
+                # never place this skill there. Reporting it as missing would
+                # suggest a sync could fix it, which it cannot.
+                $blocked += $t.name
+            } else {
+                $missing += $t.name
+            }
+        }
+
+        $skills += [pscustomobject]@{
+            name        = $dir.Name
+            description = $meta.description
+            files       = $files.Count
+            size        = $size
+            modified    = if ($modified) { $modified.ToString('yyyy-MM-dd HH:mm') } else { '' }
+            has         = $has
+            missing     = @($missing)
+            blocked     = @($blocked)
+            path        = $dir.FullName
+        }
+    }
+
+    $result.count  = $skills.Count
+    $result.skills = @($skills)
+    return [pscustomobject]$result
+}
+
 function Get-SkillBridgeStatus {
     param(
         [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json'),
         # Hashing every file of every copy-mode target is the slow part of this
         # function (seconds with 100+ skills). Callers that only need link
         # counts pass this and get no stale/out-of-date detection.
-        [switch]$SkipFingerprints
+        [switch]$SkipFingerprints,
+        # Every target then also gets `sync_map`: skill name -> "link" | "copy"
+        # for the entries of ours that match a source skill. Only the skill
+        # browser needs it; the snapshot the UI polls every 15 seconds stays
+        # small without it (~2000 fewer strings on this machine).
+        [switch]$IncludeSyncMap
     )
     # ONE snapshot of the whole setup - source, every target, last run - shared
     # by detect-tools.ps1, the health check and the web UI. They read the same
@@ -539,6 +696,13 @@ function Get-SkillBridgeStatus {
                 foreign       = @()
                 shadowed      = @()
                 issues        = @()
+                # name -> "link" | "copy", but only when the caller asks for it
+                # (see Get-SkillBridgeSkills). Built with the same
+                # case-insensitive comparer as $skillNames, so lookups match.
+                sync_map      = $null
+            }
+            if ($IncludeSyncMap) {
+                $row.sync_map = New-Object 'System.Collections.Hashtable' ([StringComparer]::OrdinalIgnoreCase)
             }
             $targets += $row
 
@@ -570,6 +734,9 @@ function Get-SkillBridgeStatus {
                 if (Test-OurSkillEntry $item $src) {
                     if ($skillNames.Contains($item.Name)) {
                         [void]$present.Add($item.Name)
+                        if ($row.sync_map) {
+                            $row.sync_map[$item.Name] = if (Test-ReparsePoint $item) { 'link' } else { 'copy' }
+                        }
                         if ($spec.Mode -eq 'copy') {
                             $row.copied++
                             if (Test-ReparsePoint $item) {

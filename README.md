@@ -25,7 +25,7 @@ Every AI coding tool maintains its own `skills/` directory. Copying skills aroun
 - **Dead links are pruned** — when a skill is deleted, the links it left behind are cleaned up instead of accumulating.
 - **CC Switch database drift is reported, never auto-repaired** — a row in `cc-switch.db` is the only record of a skill's origin (repo, branch, readme URL), so the sync reports drift and leaves the decision to you. Off by default (`"check_db": true` enables the report).
 - **Failures surface themselves** — the scheduled run is hidden, so every run records its outcome in `.skillbridge-status.json`; a failure also raises a toast, and `detect-tools` replays the last outcome on its next run.
-- **A local dashboard** — `启动WebUI.bat` shows the whole state in a browser tab (see [Web UI](#web-ui)).
+- **A local dashboard** — `启动WebUI.bat` shows the whole state in a browser tab: per-target sync state, a searchable skill browser, and a read-only database check (see [Web UI](#web-ui)).
 - **Idempotent & safe** — existing entries are never overwritten; a tool's own skills are never touched.
 - **Portable** — every path uses environment variables (`%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%`), so it runs on any machine as-is.
 
@@ -35,7 +35,7 @@ Every AI coding tool maintains its own `skills/` directory. Copying skills aroun
 - Config-driven targets (`config.json`) — add or drop a tool in one line
 - Auto-detection (`detect-tools.ps1` / `detect-tools.sh`) — adapts to whatever is installed on a machine
 - Auto-link at logon / boot (`install-autolink.ps1` / `.sh`) with optional interval
-- **Web UI** (`web-ui.ps1` + `启动WebUI.bat`) — a local dashboard: per-target state, the log tail, one-click sync and a read-only database check
+- **Web UI** (`web-ui.ps1` + `启动WebUI.bat`) — a local dashboard: per-target state, the log tail, one-click sync, a read-only database check, and a searchable skill browser
 - Cross-platform: PowerShell (Windows) and Bash (macOS / Linux)
 - Pure scripts, no daemon; Windows needs nothing extra, macOS / Linux need `python3` (for config parsing)
 
@@ -75,6 +75,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\web-ui.ps1 -Port 9001 -NoB
 ```
 
 The page shows one card per configured target (skills found, links created, copies updated, dead links pruned, failures), the tail of `sync-skills.log`, and two actions: **立即同步** runs the real `sync-skills.ps1` and streams its summary, and **数据库检查** runs the same *report-only* CC Switch database comparison the sync does — it never deletes rows. Every card expands to the per-target detail of the last run. It refreshes the snapshot every 15 seconds.
+
+Below the target cards, the **技能库 (skill browser)** lists every skill in the source folder: its description folded out of `SKILL.md`, file count, size and last change, and which targets hold it — as a link or as a real copy. Search by name or description, sort by name / coverage / size / last change, or keep only the skills that are not everywhere yet, then expand a row for the detail. That list is read when the page opens, when you press 刷新, or with its own 重新读取 button; the 15-second poll deliberately leaves it alone, because reading 100+ `SKILL.md` files is seconds of work that a poll should not repeat. (A copy-mode chip drawn dashed means what is on disk disagrees with what `config.json` asks for.)
 
 Two design points worth knowing:
 

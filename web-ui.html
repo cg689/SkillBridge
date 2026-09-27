@@ -208,6 +208,44 @@
   .detail ul.issues li { margin-bottom: 3px; }
   .detail-empty { color: var(--muted); font-size: 12.5px; }
 
+  /* -------------------------------------------------------------- skills */
+  .skills-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .skills-tools input[type="search"], .skills-tools select {
+    padding: 7px 11px; border-radius: 10px; border: 1px solid var(--border-2);
+    background: var(--surface-3); color: var(--text); font: inherit; font-size: 13px;
+  }
+  .skills-tools input[type="search"] { flex: 1 1 230px; min-width: 0; }
+  .skills-tools input::placeholder { color: var(--muted); }
+  .skills-tools input[type="search"]:focus, .skills-tools select:focus { outline: none; border-color: rgba(79,209,197,.5); }
+  .skills-tools select { cursor: pointer; }
+  .skills-tools-spacer { flex: 1; }
+  .skills-list { max-height: 560px; overflow: auto; margin: 0 -6px; padding: 0 6px; }
+  .skill-row { border-bottom: 1px solid var(--border); }
+  .skill-row:last-child { border-bottom: 0; }
+  .skill-head { display: flex; align-items: center; gap: 12px; padding: 9px 6px; cursor: pointer; border-radius: 8px; }
+  .skill-head:hover { background: rgba(255,255,255,.025); }
+  .skill-row.open .skill-head { background: rgba(79,209,197,.07); }
+  .skill-name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; flex: none; }
+  .skill-desc { font-size: 12.5px; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .skill-cov { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-dim); flex: none; }
+  .skill-cov.full { color: var(--ok); }
+  .skill-cov.partial { color: var(--warn); }
+  .skill-caret { color: var(--muted); flex: none; transition: transform .15s; }
+  .skill-row.open .skill-caret { transform: rotate(90deg); }
+  .skill-detail { display: none; padding: 2px 6px 16px; }
+  .skill-row.open .skill-detail { display: block; }
+  .skill-full { margin: 0 0 10px; font-size: 12.8px; color: var(--text-dim); line-height: 1.7; }
+  .skill-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
+  .skill-meta b { color: var(--text-dim); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .skill-path { font-family: var(--mono); font-size: 11.5px; color: var(--muted); word-break: break-all; margin-bottom: 12px; }
+  .skill-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .skill-cols h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 650; }
+  .chip.k-link { color: #7fd8cf; border-color: rgba(79,209,197,.35); background: rgba(79,209,197,.1); }
+  .chip.k-copy { color: #9ec1ff; border-color: rgba(96,165,250,.35); background: rgba(96,165,250,.1); }
+  /* Dashed = what is on disk disagrees with what config.json asks for. */
+  .chip.k-drift { border-style: dashed; border-color: rgba(251,191,36,.5); color: var(--warn); }
+  .skills-empty { padding: 26px 10px; text-align: center; color: var(--muted); font-size: 13px; }
+
   /* -------------------------------------------------------------- panels */
   .panels { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; }
   @media (max-width: 900px) { .panels { grid-template-columns: 1fr; } }
@@ -293,6 +331,11 @@
       <path d="M9 11h6M9 15h4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
     </symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-skill" viewBox="0 0 24 24">
+      <path d="M12 3l8 4.5-8 4.5-8-4.5L12 3z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="M4 12l8 4.5 8-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="M4 16.6L12 21l8-4.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    </symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v4.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.15" fill="currentColor"/></symbol>
     <symbol id="i-spin" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
   </defs>
@@ -331,6 +374,29 @@
 
   <div class="section-head"><h2>同步目标</h2><span class="hint">点击任意卡片查看明细（缺失 / 残留 / 工具自有 / 冲突）</span></div>
   <section class="targets" id="targets"></section>
+
+  <div class="section-head"><h2>技能库</h2><span class="hint">点击任意一行看它的描述、体积，以及它同步到了哪些工具</span></div>
+  <section class="card panel" id="skills-panel">
+    <div class="panel-head">
+      <svg width="18" height="18" viewBox="0 0 24 24" style="color: var(--accent)"><use href="#i-skill"/></svg>
+      <h3>全部技能</h3>
+      <span class="sub" id="skills-sub">读取中…</span>
+    </div>
+    <div class="skills-tools">
+      <input type="search" id="skill-search" placeholder="按名称或描述搜索…" autocomplete="off" spellcheck="false">
+      <select id="skill-sort" title="排序方式">
+        <option value="name">按名称</option>
+        <option value="coverage">按覆盖度</option>
+        <option value="size">按体积</option>
+        <option value="modified">按最近改动</option>
+      </select>
+      <label class="switch" title="只看还有目标没同步到的技能"><input type="checkbox" id="skill-only-gap"> 只看没全覆盖的</label>
+      <div class="skills-tools-spacer"></div>
+      <button class="btn" id="btn-skills" title="重新读取技能列表（读每个 SKILL.md，比刷新状态慢）"><svg class="icon" width="15" height="15" viewBox="0 0 24 24"><use href="#i-refresh"/></svg><svg class="spin" width="15" height="15" viewBox="0 0 24 24"><use href="#i-spin"/></svg>重新读取</button>
+    </div>
+    <div id="skills-list" class="skills-list"><div class="skills-empty">读取中…</div></div>
+    <div class="panel-foot"><span class="sub" id="skills-note"></span></div>
+  </section>
 
   <div class="section-head"><h2>数据库与日志</h2><span class="hint">check-db-sync.py 只报告，不修改 CC Switch 数据库</span></div>
   <section class="panels">
@@ -578,6 +644,150 @@
     });
   }
 
+  /* ------------------------------------------------------- skills browser */
+  // Read on demand, never by the 15-second poll: it hashes nothing, but it
+  // reads every SKILL.md and walks every skill folder (100+ here), which is
+  // seconds of work the poll should not repeat every quarter minute.
+  var skillState = { data: null, open: '', inflight: null };
+
+  function skillSizeText(bytes) {
+    if (bytes == null) return '-';
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+    if (bytes >= 1024) return Math.round(bytes / 1024) + ' KB';
+    return bytes + ' B';
+  }
+
+  function loadSkills() {
+    if (state.stopped) return Promise.resolve();
+    if (skillState.inflight) return skillState.inflight;
+    var btn = $('btn-skills');
+    busy(btn, true);
+    progress(true);
+    skillState.inflight = api('/api/skills').then(function (d) {
+      renderSkills(d);
+    }, function (e) {
+      if (!state.stopped) {
+        $('skills-list').innerHTML = '<div class="skills-empty">读取技能列表失败：' + esc(e.message) + '</div>';
+        toast('fail', '读取技能列表失败', e.message);
+      }
+    }).then(function () {
+      skillState.inflight = null;
+      busy(btn, false);
+      progress(false);
+    });
+    return skillState.inflight;
+  }
+
+  function renderSkills(d) {
+    if (d && d.error) {
+      $('skills-sub').textContent = '';
+      $('skills-note').textContent = '';
+      $('skills-list').innerHTML = '<div class="skills-empty">' + esc(String(d.error).split('\n')[0]) + '</div>';
+      return;
+    }
+    skillState.data = d;
+    $('skills-sub').textContent = num(d.count) + ' 个技能 · ' + num((d.targets || []).length) + ' 个同步目标';
+    $('skills-note').textContent = '在打开页面、点「刷新」或「重新读取」时更新；15 秒自动刷新不会重读它。';
+    renderSkillRows();
+  }
+
+  function renderSkillRows() {
+    var d = skillState.data;
+    var wrap = $('skills-list');
+    if (!d) return;
+    var totalTargets = (d.targets || []).length;
+    var modeOf = {};
+    (d.targets || []).forEach(function (t) { modeOf[t.name] = t.mode; });
+
+    var q = ($('skill-search').value || '').trim().toLowerCase();
+    var onlyGap = $('skill-only-gap').checked;
+    var rows = (d.skills || []).filter(function (s) {
+      if (onlyGap && ((s.missing || []).length + (s.blocked || []).length) === 0) return false;
+      if (!q) return true;
+      return (s.name || '').toLowerCase().indexOf(q) >= 0 ||
+             (s.description || '').toLowerCase().indexOf(q) >= 0;
+    });
+    rows = rows.slice().sort(function (a, b) {
+      var ga = (a.missing || []).length + (a.blocked || []).length;
+      var gb = (b.missing || []).length + (b.blocked || []).length;
+      switch ($('skill-sort').value) {
+        case 'coverage': return ga - gb || a.name.localeCompare(b.name);
+        case 'size':     return (b.size || 0) - (a.size || 0) || a.name.localeCompare(b.name);
+        case 'modified': return String(b.modified || '').localeCompare(String(a.modified || '')) || a.name.localeCompare(b.name);
+        default:         return a.name.localeCompare(b.name);
+      }
+    });
+
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="skills-empty">' +
+        ((q || onlyGap) ? '没有符合条件的技能。' : '还没有任何技能。') + '</div>';
+      return;
+    }
+
+    wrap.innerHTML = rows.map(function (s) {
+      var hasKeys = Object.keys(s.has || {});
+      var gap = (s.missing || []).length + (s.blocked || []).length;
+      var hasChips;
+      if (hasKeys.length) {
+        hasChips = '<div class="chips">' + hasKeys.map(function (n) {
+          var kind = s.has[n], mode = modeOf[n], drift = (kind !== mode);
+          var title = n + '：' + (kind === 'copy' ? '真实副本' : '链接') +
+                      (drift ? '，但配置要求 ' + (mode || 'link') : '');
+          return '<span class="chip k-' + esc(kind) + (drift ? ' k-drift' : '') + '" title="' + esc(title) + '">' + esc(n) + '</span>';
+        }).join('') + '</div>';
+      } else {
+        hasChips = '<div class="detail-empty">还没有同步到任何目标，点右上角「立即同步」。</div>';
+      }
+      var missChips = (s.missing || []).length
+        ? '<div class="chips">' + s.missing.map(function (n) {
+            return '<span class="chip hot">' + esc(n) + '</span>';
+          }).join('') + '</div>'
+        : '<div class="detail-empty">无。</div>';
+      var blockedChips = (s.blocked || []).length
+        ? '<div class="chips">' + s.blocked.map(function (n) {
+            return '<span class="chip hot" title="工具自己就有同名目录，同步不会写入它">' + esc(n) + '</span>';
+          }).join('') + '</div>'
+        : '<div class="detail-empty">无。</div>';
+
+      return '<div class="skill-row' + (skillState.open === s.name ? ' open' : '') + '" data-name="' + esc(s.name) + '">' +
+        '<div class="skill-head">' +
+          '<svg class="skill-caret" width="12" height="12" viewBox="0 0 24 24"><use href="#i-chevron"/></svg>' +
+          '<span class="skill-name">' + esc(s.name) + '</span>' +
+          '<span class="skill-desc">' + esc(s.description || '（SKILL.md 里没有 description）') + '</span>' +
+          '<span class="skill-cov ' + (gap ? 'partial' : 'full') + '">' + hasKeys.length + '/' + num(totalTargets) + '</span>' +
+        '</div>' +
+        '<div class="skill-detail">' +
+          (s.description ? '<p class="skill-full">' + esc(s.description) + '</p>' : '') +
+          '<div class="skill-meta">' +
+            '<span><b>' + num(s.files) + '</b> 个文件</span>' +
+            '<span><b>' + skillSizeText(s.size) + '</b></span>' +
+            (s.modified ? '<span>最近改动 <b>' + esc(s.modified) + '</b></span>' : '') +
+          '</div>' +
+          '<div class="skill-path">' + esc(s.path) + '</div>' +
+          '<div class="skill-cols">' +
+            '<div><h4>已同步 <span class="n">' + hasKeys.length + '</span></h4>' + hasChips + '</div>' +
+            '<div><h4>缺失 <span class="n">' + (s.missing || []).length + '</span></h4>' + missChips + '</div>' +
+            '<div><h4>被工具占用（同步不会写）</h4>' + blockedChips + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    Array.prototype.forEach.call(wrap.querySelectorAll('.skill-row'), function (el) {
+      el.addEventListener('click', function () {
+        var open = !el.classList.contains('open');
+        // One row open at a time: 127 expanded rows is a wall of text. The
+        // choice lives outside the DOM for the same reason the target cards'
+        // open state does — every re-render rebuilds these elements.
+        Array.prototype.forEach.call(wrap.querySelectorAll('.skill-row.open'), function (other) {
+          if (other !== el) other.classList.remove('open');
+        });
+        el.classList.toggle('open', open);
+        skillState.open = open ? el.getAttribute('data-name') : '';
+      });
+    });
+  }
+
   function classifyLogLine(line) {
     if (/FAIL|error|ERROR|\[!\]|\[error\]|DRIFT/.test(line)) return 'ln-err';
     if (/WARN|WARNING|注意|警告/.test(line)) return 'ln-warn';
@@ -614,7 +824,12 @@
   // one request at a time, so without this they queue up and then fire in a
   // burst (each one re-rendering the page behind the user's back).
   var refreshChain = Promise.resolve();
-  function refresh() {
+  // A sync can add or remove skills, so a manual refresh also re-reads the
+  // skill browser. The 15s poll does not: that list is the most expensive
+  // endpoint and nobody waits 15 seconds for it to be one byte fresher.
+  var reloadSkillsNextRefresh = false;
+  function refresh(withSkills) {
+    if (withSkills) reloadSkillsNextRefresh = true;
     refreshChain = refreshChain.then(doRefresh, doRefresh);
     return refreshChain;
   }
@@ -632,7 +847,12 @@
       if (s.error) b.push('<div class="banner"><b>无法开始同步：</b><br>' + esc(s.error).replace(/\n/g, '<br>') + '</div>');
       else if (s.needs_sync) b.push('<div class="banner info">有 ' + num((s.totals.missing || 0) + (s.totals.stale || 0)) + ' 个技能待同步/待刷新，点击右上角「立即同步」补齐。</div>');
       banner(b.join(''));
-      return api('/api/log?lines=200').then(renderLog).catch(function () {});
+      var wantSkills = reloadSkillsNextRefresh;
+      reloadSkillsNextRefresh = false;
+      return api('/api/log?lines=200').then(renderLog).catch(function () {})
+        .then(function () {
+          if (wantSkills && !state.stopped) return loadSkills();
+        });
     }).catch(function (e) {
       if (state.stopped) {
         banner('<div class="banner info">服务已停止，可以关闭这个标签页和命令行窗口了。</div>');
@@ -673,9 +893,13 @@
       .then(function () { busy(btn, false); });
   }
 
-  $('btn-refresh').addEventListener('click', refresh);
+  $('btn-refresh').addEventListener('click', function () { refresh(true); });
   $('btn-sync').addEventListener('click', runSync);
   $('btn-db').addEventListener('click', runDbCheck);
+  $('btn-skills').addEventListener('click', loadSkills);
+  $('skill-search').addEventListener('input', renderSkillRows);
+  $('skill-sort').addEventListener('change', renderSkillRows);
+  $('skill-only-gap').addEventListener('change', renderSkillRows);
   $('btn-log').addEventListener('click', function () {
     var b = this; busy(b, true);
     api('/api/log?lines=200').then(renderLog).catch(function (e) { toast('fail', '读取日志失败', e.message); })
@@ -734,10 +958,12 @@
     // writing to all 20+ targets, so the shortcut is refresh-only now.
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
-    if (e.key === 'r' || e.key === 'R') { e.preventDefault(); refresh(); }
+    if (e.key === 'r' || e.key === 'R') { e.preventDefault(); refresh(true); }
   });
 
-  refresh();
+  // With the skill browser, so the first paint already has it: a page that shows
+  // an empty list until someone finds 「重新读取」 reads as broken.
+  refresh(true);
 })();
 </script>
 </body>

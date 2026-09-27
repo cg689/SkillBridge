@@ -15,14 +15,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sync-skills.log`, and two actions: run a sync, or run the same *report-only*
   CC Switch database check the sync does. It refreshes every 15 seconds and
   stops with the console window or a button in the page.
+- **A skill browser in the dashboard.** A second section lists every skill in
+  the source: the description folded out of `SKILL.md`, file count, size, last
+  change, and which targets hold it — as a link or as a real copy. Search by
+  name or description, sort by name / coverage / size / last change, filter to
+  the ones that are not everywhere yet, and expand a row for the per-target
+  detail. Served by `GET /api/skills`, backed by the new
+  `Get-SkillBridgeSkills` and `Get-SkillFrontMatter` in `common.psm1` (the
+  latter joins the folded `>-` / `|` description scalars by hand — there is no
+  YAML dependency). It is read when the page opens, on 刷新 / after a driven
+  sync, and with the list's own 重新读取 button — deliberately **not** by the
+  15-second poll, since walking 100+ `SKILL.md` files is seconds of work a poll
+  should not repeat. A dashed copy chip means the shape on disk disagrees with
+  the mode `config.json` asks for.
+- `Get-SkillBridgeSkills` in `common.psm1`: the skill list behind that browser —
+  one entry per source skill with its front matter, size, mtime and a compact
+  target→kind map — so the page and the smoke suite share one implementation.
 - `Get-SkillBridgeStatus` in `common.psm1`: one snapshot of the whole sync
   state (source, per-target linked / missing / copied / failed, last run
   record) that the dashboard, the smoke suite and any other caller share, so
-  "what does the sync think" has exactly one implementation.
+  "what does the sync think" has exactly one implementation. Gained
+  `-IncludeSyncMap`, which fills a per-target name→link-or-copy map on demand:
+  the 15-second snapshot does not pay for the extra walk.
 - `tests/smoke-webui.ps1`: drives the dashboard's API the way the page does
   and asserts that every call without the per-start token is refused (403),
   that `GET /api/sync` and `GET /api/db-check` are 405, that a driven sync
-  really creates the junction and the copy and exits 0, that
+  really creates the junction and the copy and exits 0, that `GET /api/skills`
+  reports the fixture's folded description as one line with its size and
+  mtime and its per-target coverage before the sync (`link` for the junction
+  target, `copy` for the copy target after it), that
   `POST /api/db-check` leaves `cc-switch.db` byte-identical, that the listener
   is on `127.0.0.1` / `::1` only (a connection to this machine's own LAN
   address is refused), and that `POST /api/stop` shuts it down cleanly. CI now

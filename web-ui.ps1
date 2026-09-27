@@ -6,6 +6,7 @@
 #
 #   GET  /              the dashboard (web-ui.html, token injected)
 #   GET  /api/status    one snapshot: source, every target, last run
+#   GET  /api/skills    every source skill: description, size, where it landed
 #   POST /api/sync      run sync-skills.ps1 and return its output
 #   GET  /api/log       the tail of sync-skills.log
 #   POST /api/db-check  compare the skills folder with cc-switch.db (report only)
@@ -275,6 +276,12 @@ function Handle-Request {
     switch -Regex ($req.path) {
         '^/api/status$' {
             Send-Json -Context $req -Value (Get-SkillBridgeStatus -ConfigPath $ConfigPath)
+            return
+        }
+        '^/api/skills$' {
+            # Fetched on demand only: it reads every SKILL.md and walks every
+            # skill folder, which is far more work than the 15-second poll pays.
+            Send-Json -Context $req -Value (Get-SkillBridgeSkills -ConfigPath $ConfigPath)
             return
         }
         '^/api/log$' {

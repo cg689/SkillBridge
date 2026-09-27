@@ -12,6 +12,9 @@
 #   * an unknown /api/ path with a valid token is 404
 #   * GET /api/status is the shared snapshot (source, skill count, per-target
 #     linked/missing) and it changes as the sync lands
+#   * GET /api/skills is the skill browser's payload: description folded out of
+#     the SKILL.md frontmatter, file count/size, and per-target link/copy/missing
+#     (asserted before AND after the sync, when the kinds change)
 #   * GET /api/log?lines=N honours the tail size
 #   * POST /api/sync really runs sync-skills.ps1: the junction and the copy
 #     appear on disk, exit code 0, and the run record is refreshed
@@ -41,7 +44,17 @@ $env:SKILLBRIDGE_NO_NOTIFY = '1'
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('sb-webui-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path (Join-Path $tmp 'src\demo-skill') -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $tmp 'tgt\own-skill') -Force | Out-Null
-Set-Content -Path (Join-Path $tmp 'src\demo-skill\SKILL.md') -Value '# demo' -Encoding UTF8
+# A folded (`>-`) description on purpose: that is the shape the real skills use,
+# and /api/skills has to join the indented lines into one line for the UI.
+Set-Content -Path (Join-Path $tmp 'src\demo-skill\SKILL.md') -Value @'
+---
+name: demo-skill
+description: >-
+  冒烟测试用的技能。第一行描述，
+  第二行仍然是同一段描述。
+---
+# demo
+'@ -Encoding UTF8
 
 $cfg = @{
     link_type = 'junction'
@@ -194,6 +207,7 @@ try {
     # -- no token, no API -----------------------------------------------------
     foreach ($m in @(
         @{ m = 'GET';  p = 'api/status' },
+        @{ m = 'GET';  p = 'api/skills' },
         @{ m = 'GET';  p = 'api/log' },
         @{ m = 'GET';  p = 'api/sync' },
         @{ m = 'POST'; p = 'api/sync'; b = '{}' },
@@ -253,6 +267,32 @@ try {
         throw "FAIL: link target not reported as empty (linked=$($linkT.linked) missing=$(@($linkT.missing).Count))"
     }
 
+    # -- the skill browser, before anything is synced -------------------------
+    $sk1 = Get-JsonResult (Invoke-Api -Method 'GET' -Path 'api/skills' -Token $Token) 'GET /api/skills'
+    if ($sk1.count -ne 1) { throw "FAIL: /api/skills returned count=$($sk1.count), expected 1" }
+    $one = @($sk1.skills)[0]
+    if ($one.name -ne 'demo-skill') { throw "FAIL: /api/skills reported name '$($one.name)'" }
+    # The folded block must arrive as ONE line, or the UI row wraps.
+    if ($one.description -notmatch '第一行描述' -or $one.description -notmatch '第二行仍然是同一段描述') {
+        throw "FAIL: /api/skills lost part of the folded description: '$($one.description)'"
+    }
+    if ($one.description -match "`r|`n") { throw "FAIL: the description was not folded into one line: '$($one.description)'" }
+    if ($one.files -lt 1) { throw "FAIL: /api/skills reported files=$($one.files)" }
+    if ($one.size -le 0) { throw "FAIL: /api/skills reported size=$($one.size)" }
+    if ($one.modified -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$') {
+        throw "FAIL: /api/skills reported modified='$($one.modified)' (expected yyyy-MM-dd HH:mm)"
+    }
+    # `has` is a JSON OBJECT (target name -> link/copy), not an array, so the
+    # emptiness test has to look at its properties.
+    if (@($one.has.PSObject.Properties).Count -ne 0) { throw 'FAIL: before the sync the skill must not be anywhere' }
+    if (@($one.missing).Count -ne 2) {
+        throw "FAIL: /api/skills expected 2 missing targets, got $(@($one.missing).Count)"
+    }
+    if (@($one.blocked).Count -ne 0) { throw 'FAIL: nothing in the fixture shadows the skill, so blocked must be empty' }
+    if (@($sk1.targets).Count -ne 2) {
+        throw "FAIL: /api/skills expected 2 targets listed, got $(@($sk1.targets).Count)"
+    }
+
     # -- the log tail ---------------------------------------------------------
     $lg = Get-JsonResult (Invoke-Api -Method 'GET' -Path 'api/log?lines=3' -Token $Token) 'GET /api/log?lines=3'
     if ($lg.exists -ne $true) { throw 'FAIL: /api/log says the log does not exist' }
@@ -302,6 +342,20 @@ try {
     if ($st2.needs_sync -ne $false) {
         throw 'FAIL: after a clean sync the snapshot still reports needs_sync'
     }
+
+    # -- and the same browser, once both targets hold it ----------------------
+    $sk2 = Get-JsonResult (Invoke-Api -Method 'GET' -Path 'api/skills' -Token $Token) 'GET /api/skills after sync'
+    $one2 = @($sk2.skills)[0]
+    if (@($one2.missing).Count -ne 0 -or @($one2.blocked).Count -ne 0) {
+        throw 'FAIL: after the sync the skill browser still reports it as missing somewhere'
+    }
+    # `has` names what is ACTUALLY on disk: the link target gets a link, the
+    # copy target a real copy. A config that asked for copy but still shows
+    # 'link' here is drift the sync repairs, which is the point of the field.
+    $linkKind = $one2.has.'WebUi'
+    $copyKind = $one2.has.'WebUiCopy'
+    if ($linkKind -ne 'link') { throw "FAIL: WebUi holds '$linkKind' where a link was expected" }
+    if ($copyKind -ne 'copy') { throw "FAIL: WebUiCopy holds '$copyKind' where a real copy was expected" }
 
     # -- db-check must report, never repair ----------------------------------
     # The byte hash is the assertion: the user's rule is that nothing automated
@@ -408,7 +462,7 @@ try {
     if ($srvOut -notmatch 'sync requested') {
         throw "FAIL: the server did not log the driven sync: $srvOut"
     }
-    Write-Host 'OK: web-ui smoke (page+token, 403 gate, 405/404, snapshot, log tail, driven sync, report-only db-check, loopback bind, clean stop)'
+    Write-Host 'OK: web-ui smoke (page+token, 403 gate, 405/404, snapshot, skill browser, log tail, driven sync, report-only db-check, loopback bind, clean stop)'
 } finally {
     if ($proc -and -not $proc.HasExited) {
         try { $proc.Kill() } catch { }
