@@ -18,14 +18,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 LOG="$ROOT/sync-skills.log"
 REPO_CONFIG="$ROOT/config.json"
+STATUS="$ROOT/.skillbridge-status.json"
 
 # make the %HERMES_HOME% case deterministic regardless of the runner env
 unset HERMES_HOME
+
+# The runs under test deliberately walk failure paths; do not try to notify-send
+# from the developer's desktop while they happen.
+export SKILLBRIDGE_NO_NOTIFY=1
 
 LOG_BAK="$TMP/log.bak"
 if [ -f "$LOG" ]; then cp "$LOG" "$LOG_BAK"; fi
 CFG_BAK="$TMP/config.bak"
 if [ -f "$REPO_CONFIG" ]; then cp "$REPO_CONFIG" "$CFG_BAK"; fi
+STATUS_BAK="$TMP/status.bak"
+if [ -f "$STATUS" ]; then cp "$STATUS" "$STATUS_BAK"; fi
 
 cleanup() {
     if [ -f "$LOG_BAK" ]; then
@@ -37,6 +44,11 @@ cleanup() {
         cp "$CFG_BAK" "$REPO_CONFIG"
     else
         rm -f "$REPO_CONFIG"
+    fi
+    if [ -f "$STATUS_BAK" ]; then
+        cp "$STATUS_BAK" "$STATUS"
+    else
+        rm -f "$STATUS"
     fi
     rm -rf "$TMP"
 }
@@ -82,6 +94,15 @@ if ! bash "$ROOT/sync-skills.sh" "$TMP/cfg.json" >/dev/null 2>"$TMP/stderr.log";
 fi
 if [ ! -L "$TGT/demo-skill" ]; then
     echo "FAIL: symlink not created at $TGT/demo-skill" >&2
+    exit 1
+fi
+# A clean run records itself; a silent crash is what this record exists for.
+if [ ! -f "$STATUS" ]; then
+    echo "FAIL: sync-skills.sh wrote no .skillbridge-status.json" >&2
+    exit 1
+fi
+if ! grep -q '"status":"ok"' "$STATUS"; then
+    echo "FAIL: expected status ok after a clean run, got: $(cat "$STATUS")" >&2
     exit 1
 fi
 if [ -L "$TGT-copy/demo-skill" ] || [ ! -f "$TGT-copy/demo-skill/SKILL.md" ]; then

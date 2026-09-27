@@ -45,15 +45,40 @@ while [ $# -gt 0 ]; do
 done
 CONFIG="${CONFIG:-$SCRIPT_DIR/config.json}"
 LOG="$SCRIPT_DIR/sync-skills.log"
+STATUS="$SCRIPT_DIR/.skillbridge-status.json"
+STATUS_WRITTEN=0
+
+# The Unix variant usually runs from cron/launchd, where stderr goes nowhere:
+# a crash (or a failed link) would be completely invisible. Record the outcome
+# next to the log, and pop a desktop notification when there is a desktop.
+sb_fail() {
+    echo "[ERROR] $1" >&2
+    printf '{"status":"fail","at":"%s","message":"%s"}\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S')" "$(printf '%s' "$1" | tr '\n' ' ')" \
+        > "$STATUS" 2>/dev/null || true
+    if command -v notify-send >/dev/null 2>&1 && [ -z "${SKILLBRIDGE_NO_NOTIFY:-}" ]; then
+        notify-send "SkillBridge sync FAILED" "$1" 2>/dev/null || true
+    fi
+    exit 1
+}
+
+# Any exit the script did not finish cleanly (a set -u abort, a killed child)
+# still lands here as a recorded failure instead of a silent non-zero.
+sb_on_exit() {
+    code=$?
+    if [ "$code" -ne 0 ] && [ "$STATUS_WRITTEN" -eq 0 ] && [ "${SB_IN_EXIT_TRAP:-0}" -eq 0 ]; then
+        SB_IN_EXIT_TRAP=1
+        sb_fail "sync-skills.sh exited $code without finishing (see $LOG)"
+    fi
+}
+trap sb_on_exit EXIT
 
 if [ ! -f "$CONFIG" ]; then
-    echo "[ERROR] config not found: $CONFIG" >&2
-    exit 1
+    sb_fail "config not found: $CONFIG"
 fi
 
 if ! command -v python3 >/dev/null 2>&1; then
-    echo "[ERROR] python3 is required to parse $CONFIG (not found on PATH)." >&2
-    exit 1
+    sb_fail "python3 is required to parse $CONFIG (not found on PATH)."
 fi
 
 # Read the config in ONE python pass: line 1 = expanded source dir, following
@@ -448,9 +473,39 @@ fi
 
 echo "== done $(date '+%Y-%m-%d %H:%M:%S') | created=$created updated=$updated pruned=$pruned skipped=$skipped failed=$failed ==" | tee -a "$LOG"
 
-check_db="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("check_db",True))' "$CONFIG" 2>/dev/null || echo True)"
+# Compare the skills folder with CC Switch's own database (see check-db-sync.py).
+# REPORT ONLY: repairing the drift means deleting rows from CC Switch's database,
+# and a row is the only record of a skill's origin (repo, branch, readme URL) —
+# a reconstruction cannot bring those fields back. That call belongs to the user;
+# this only surfaces the drift. Repair by hand with:
+#     python3 check-db-sync.py --fix      (backs the database up first)
+db_drift=""
+check_db="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("check_db",False))' "$CONFIG" 2>/dev/null || echo False)"
 if [ "$check_db" = "True" ] && [ -f "$SCRIPT_DIR/check-db-sync.py" ] && [ -f "$HOME/.cc-switch/cc-switch.db" ]; then
-    python3 "$SCRIPT_DIR/check-db-sync.py" --fix --source "$SRC" --log "$LOG" || true
+    python3 "$SCRIPT_DIR/check-db-sync.py" --source "$SRC" --log "$LOG" \
+        || db_drift="cc-switch.db is out of step with the skills folder (details in $LOG; repair by hand with python3 check-db-sync.py --fix)"
+fi
+
+# Record the outcome for the scheduled (silent) runs: `fail` and `warn` both
+# notify when a desktop is available; `ok` just refreshes the record.
+STATUS_WRITTEN=1
+if [ "$failed" -gt 0 ]; then
+    sb_status=fail
+    sb_note="$failed skill(s) could not be linked - see $LOG"
+elif [ -n "$db_drift" ]; then
+    sb_status=warn
+    sb_note="$db_drift"
+else
+    sb_status=ok
+    sb_note=""
+fi
+printf '{"status":"%s","at":"%s","message":"%s"}\n' \
+    "$sb_status" "$(date '+%Y-%m-%d %H:%M:%S')" "$sb_note" \
+    > "$STATUS" 2>/dev/null || true
+if [ "$sb_status" != "ok" ] && command -v notify-send >/dev/null 2>&1 && [ -z "${SKILLBRIDGE_NO_NOTIFY:-}" ]; then
+    sb_title="SkillBridge sync FAILED"
+    [ "$sb_status" = "warn" ] && sb_title="SkillBridge sync: database out of step"
+    notify-send "$sb_title" "$sb_note" 2>/dev/null || true
 fi
 
 if [ "$failed" -gt 0 ]; then

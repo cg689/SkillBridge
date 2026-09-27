@@ -198,6 +198,54 @@ class CheckDbSyncTests(unittest.TestCase):
         result = run_check(self.source, os.path.join(self.tmp.name, "nope.db"))
         self.assertEqual(result.returncode, 2)
 
+    def test_report_only_never_writes_the_db(self):
+        """The sync runs this without --fix: drift must not touch a single row.
+
+        A row is the only record of a skill's origin, so "reporting" that leaves
+        the file byte-identical (not just the same rows) is the whole contract.
+        """
+        write_skill(self.source, "keep-me")
+        conn = sqlite3.connect(self.db)
+        conn.execute(
+            "INSERT INTO skills (id, name, directory, repo_owner, readme_url) "
+            "VALUES ('gone', 'gone', 'gone', 'someone', 'https://example.com')"
+        )
+        conn.commit()
+        conn.close()
+        with open(self.db, "rb") as handle:
+            before = handle.read()
+        before_mtime = os.stat(self.db).st_mtime_ns
+
+        result = run_check(self.source, self.db)
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("gone", result.stdout, "the drift is still listed")
+        self.assertIn("nothing was changed", result.stdout)
+        self.assertIn("--fix", result.stdout, "the hint names the manual repair")
+        with open(self.db, "rb") as handle:
+            after = handle.read()
+        self.assertEqual(after, before)
+        self.assertEqual(os.stat(self.db).st_mtime_ns, before_mtime)
+        self.assertFalse(
+            os.path.isdir(os.path.join(self.tmp.name, "backups")),
+            "a report-only run must not create a backup either",
+        )
+
+    def test_fix_warns_about_the_origin_loss_before_deleting(self):
+        """--fix is manual now; it must say what a delete costs before doing it."""
+        write_skill(self.source, "keep-me")
+        conn = sqlite3.connect(self.db)
+        conn.execute(
+            "INSERT INTO skills (id, name, directory, repo_owner, readme_url) "
+            "VALUES ('gone', 'gone', 'gone', 'someone', 'https://example.com')"
+        )
+        conn.commit()
+        conn.close()
+        result = run_check(self.source, self.db, extra=["--fix"])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("about to DELETE 1 row(s)", result.stdout)
+        self.assertIn("only record of a skill's origin", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

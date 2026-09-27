@@ -23,6 +23,15 @@ $log = Join-Path $root 'sync-skills.log'
 $logBackup = if (Test-Path $log) { [IO.File]::ReadAllBytes($log) } else { $null }
 $repoConfig = Join-Path $root 'config.json'
 $cfgBackup = if (Test-Path $repoConfig) { [IO.File]::ReadAllBytes($repoConfig) } else { $null }
+# sync-skills.ps1 records every run's outcome here; the test must not leave the
+# machine's real record behind.
+Import-Module (Join-Path $root 'common.psm1') -Force
+$statusFile = Get-RunStatusPath $log
+$statusBackup = if (Test-Path $statusFile) { [IO.File]::ReadAllBytes($statusFile) } else { $null }
+# The runs under test end in `fail` on purpose in places; do not toast the user
+# sitting in front of the machine while the suite pokes at those paths.
+$prevNoNotify = $env:SKILLBRIDGE_NO_NOTIFY
+$env:SKILLBRIDGE_NO_NOTIFY = '1'
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('sb-smoke-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path (Join-Path $tmp 'src\demo-skill') -Force | Out-Null
@@ -94,6 +103,18 @@ try {
     }
     if ($out1 -notmatch 'skills=1') {
         throw "FAIL: first run expected skills=1 (archive skipped), got: $out1"
+    }
+    # A successful hidden run must record itself — this is what makes a silent
+    # crash visible next time.
+    $runStatus = Read-RunStatus $statusFile
+    if ($null -eq $runStatus) {
+        throw 'FAIL: sync-skills.ps1 wrote no .skillbridge-status.json'
+    }
+    if ($runStatus.status -ne 'ok') {
+        throw "FAIL: expected status ok after a clean run, got: $runStatus"
+    }
+    if ("$($runStatus.at)" -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$') {
+        throw "FAIL: status timestamp missing or malformed, got: $runStatus"
     }
     $link = Get-Item (Join-Path $tmp 'tgt\demo-skill') -Force
     if ($link.LinkType -ne 'Junction') {
@@ -362,7 +383,7 @@ try {
     }
     Write-Host 'OK: install-autolink -DryRun is side-effect free'
 } finally {
-    # restore repo config.json / log, byte-identical
+    # restore repo config.json / log / run-status file, byte-identical
     if ($null -ne $cfgBackup) {
         [System.IO.File]::WriteAllBytes($repoConfig, $cfgBackup)
     } else {
@@ -373,5 +394,11 @@ try {
     } else {
         Remove-Item $log -Force -ErrorAction SilentlyContinue
     }
+    if ($null -ne $statusBackup) {
+        [System.IO.File]::WriteAllBytes($statusFile, $statusBackup)
+    } else {
+        Remove-Item $statusFile -Force -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $prevNoNotify) { $env:SKILLBRIDGE_NO_NOTIFY = $prevNoNotify } else { $env:SKILLBRIDGE_NO_NOTIFY = '' }
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }

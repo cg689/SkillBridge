@@ -20,23 +20,37 @@ $ErrorActionPreference = 'Continue'
 
 Import-Module (Join-Path $PSScriptRoot 'common.psm1') -Force
 
-if (-not (Test-Path $ConfigPath)) {
-    Write-Host "[ERROR] config not found: $ConfigPath" -ForegroundColor Red
+# Where the outcome of a hidden run is recorded (the scheduled task runs with
+# -WindowStyle Hidden, so a crash would otherwise leave no visible trace).
+$statusPath = Get-RunStatusPath (Join-Path $PSScriptRoot 'sync-skills.log')
+
+function Fail-Sync {
+    param([string]$Message)
+    Write-Host "[ERROR] $Message" -ForegroundColor Red
+    Write-RunStatus -Path $statusPath -Status fail -Message $Message
+    Show-StatusToast -Title 'SkillBridge sync FAILED' -Message $Message -Status fail
     exit 1
 }
+
+trap [System.Exception] {
+    # A terminating error nobody handled: record it and toast instead of
+    # letting a hidden window die silently.
+    $msg = "sync crashed: $($_.Exception.Message)"
+    Write-Host "[ERROR] $msg" -ForegroundColor Red
+    Write-RunStatus -Path $statusPath -Status fail -Message $msg
+    Show-StatusToast -Title 'SkillBridge sync FAILED' -Message "$msg (see sync-skills.log)" -Status fail
+    exit 1
+}
+
+if (-not (Test-Path $ConfigPath)) { Fail-Sync "config not found: $ConfigPath" }
 $config = Read-ConfigFile $ConfigPath
-if ($null -eq $config) {
-    Write-Host "[ERROR] could not parse config: $ConfigPath" -ForegroundColor Red
-    exit 1
-}
+if ($null -eq $config) { Fail-Sync "could not parse config: $ConfigPath" }
 
 $src = (Expand-EnvPath ([string]$config.source)).Trim()
 $log = Join-Path $PSScriptRoot 'sync-skills.log'
 
 if (-not (Test-Path $src)) {
-    Write-Host "[ERROR] source dir not found: $src" -ForegroundColor Red
-    Write-Host "        Is CC Switch installed? Set the correct path in config.json (source)." -ForegroundColor Yellow
-    exit 1
+    Fail-Sync "source dir not found: $src`n        Is CC Switch installed? Set the correct path in config.json (source)."
 }
 # Underscore-prefixed directories are archives (`_archived/...`), never skills.
 # Same rule as check-db-sync.py so the two views of the source cannot drift.
@@ -46,8 +60,7 @@ $skills = Get-ChildItem -Path $src -Directory -ErrorAction SilentlyContinue |
         (Test-Path (Join-Path $_.FullName 'SKILL.md'))
     }
 if ($skills.Count -eq 0) {
-    Write-Host "[ERROR] no skills found in source dir: $src (no subfolder contains SKILL.md)" -ForegroundColor Red
-    exit 1
+    Fail-Sync "no skills found in source dir: $src (no subfolder contains SKILL.md)"
 }
 
 # junction on Windows by default; honor config.link_type = 'symlink' if set
@@ -220,9 +233,16 @@ $lines += $summary
 Write-Log -Lines $lines -Path $log
 Write-Output $summary
 
-# Keep cc-switch.db in step with the skills folder (see check-db-sync.py).
+# Compare the skills folder with CC Switch's own database (see check-db-sync.py).
 # Optional: silently skipped when Python, the script, or the database is absent.
-$checkDb = if ($null -ne $config.check_db) { [bool]$config.check_db } else { $true }
+#
+# REPORT ONLY. Repairing that drift means deleting rows from CC Switch's
+# database, and a row is the only record of a skill's origin (repo, branch,
+# readme URL) — a reconstruction cannot bring those fields back. Deciding a row
+# should die is the user's call, so this only reports. Repair by hand with
+#     python check-db-sync.py --fix        (backs the database up first)
+$dbDrift  = ''
+$checkDb  = if ($null -ne $config.check_db) { [bool]$config.check_db } else { $false }
 if ($checkDb) {
     $pyExe    = Resolve-PythonExe
     $pyScript = Join-Path $PSScriptRoot 'check-db-sync.py'
@@ -230,11 +250,37 @@ if ($checkDb) {
     if ($pyExe -and (Test-Path $pyScript) -and (Test-Path $ccDb)) {
         # check-db-sync.py appends its own UTF-8 output to the log. Piping it
         # through PowerShell would re-encode it and garble non-ASCII text.
-        & $pyExe $pyScript --fix --source $src --log $log
-        if ($LASTEXITCODE -gt 1) {
-            Write-Warning "check-db-sync.py exited with $LASTEXITCODE"
+        & $pyExe $pyScript --source $src --log $log
+        if ($LASTEXITCODE -eq 1) {
+            $dbDrift = 'cc-switch.db is out of step with the skills folder (details in sync-skills.log; repair by hand with `python check-db-sync.py --fix`)'
+            Write-Warning $dbDrift
+        } elseif ($LASTEXITCODE -gt 1) {
+            $dbDrift = "check-db-sync.py exited $LASTEXITCODE (details in sync-skills.log)"
+            Write-Warning $dbDrift
         }
     }
+}
+
+# Record the outcome and surface it: the scheduled run is hidden, so the log
+# alone leaves a crash (or a failed link) completely invisible. `fail` and
+# `warn` both notify; `ok` just refreshes the record.
+$runStatus = 'ok'
+$runNote   = ''
+if ($failed -gt 0) {
+    $runStatus = 'fail'
+    $runNote   = "$failed skill(s) could not be linked - see sync-skills.log"
+} elseif ($dbDrift) {
+    $runStatus = 'warn'
+    $runNote   = $dbDrift
+}
+Write-RunStatus -Path $statusPath -Status $runStatus -Message $runNote
+if ($runStatus -ne 'ok') {
+    $toastTitle = if ($runStatus -eq 'fail') {
+        'SkillBridge sync FAILED'
+    } else {
+        'SkillBridge sync: database out of step'
+    }
+    Show-StatusToast -Title $toastTitle -Message $runNote -Status $runStatus
 }
 
 if ($failed -gt 0) { exit 1 }

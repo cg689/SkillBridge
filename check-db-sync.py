@@ -7,10 +7,16 @@ folder, or by being generated locally, is therefore never registered: it stays
 out of the Codex sync and never appears in the CC Switch UI.
 
 This script closes that gap. It compares the skills folder against the database
-and reports the drift, or repairs it with --fix.
+and reports the drift; the repair itself (--fix) is MANUAL only.
 
-Called automatically at the end of sync-skills.ps1 / sync-skills.sh (unless
-`check_db` is false in config.json). Can also be run by hand.
+Why --fix is never run automatically: a row in `skills` is the only record of
+where a skill came from (repo owner/name/branch, readme URL). When a folder
+leaves the source — archived, renamed, temporarily unmounted — the automatic
+sync used to "repair" the database by deleting its row, and the origin fields
+could not be reconstructed afterwards. Deleting is a judgement call about CC
+Switch's own data, so a human makes it now. Sync runs this script in
+report-only mode and surfaces any drift in sync-skills.log; run --fix by hand
+when the drift is real.
 
 Usage:
     python check-db-sync.py [--fix] [--quiet] [--log FILE] [--source DIR] [--db FILE]
@@ -148,7 +154,11 @@ def scan_db(db_path):
 
 def main():
     parser = argparse.ArgumentParser(description="CC Switch skills/DB consistency check")
-    parser.add_argument("--fix", action="store_true", help="repair the drift (backs up the DB first)")
+    parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="repair the drift (backs up the DB first) — run by hand, never automatically",
+    )
     parser.add_argument("--quiet", action="store_true", help="print nothing when already in sync")
     parser.add_argument("--log", metavar="FILE", help="also append output to FILE (UTF-8)")
     parser.add_argument("--source", default=DEFAULT_SOURCE, help="skills folder to check")
@@ -196,7 +206,11 @@ def main():
             print(f"  - {name}")
 
     if not args.fix:
-        print("\nhint: rerun with --fix to repair (the database is backed up first)")
+        print("\nnothing was changed. To repair by hand:")
+        print(f"    python check-db-sync.py --fix --source {args.source} --db {args.db}")
+        print("--fix deletes the rows listed above. Re-read that list first: a row is")
+        print("the only record of a skill's origin, and removing it cannot be undone")
+        print("by re-registering the folder later. (The database is backed up first.)")
         return 1
 
     # Safety rail: an empty skills folder is far more likely to mean "wrong
@@ -211,6 +225,15 @@ def main():
         print("          Repairing would delete every row. Check --source first.")
         print("          If the folder really is empty on purpose, pass --allow-empty-source.")
         return 2
+
+    # No caller passes --fix, so a human is reading this: make the cost of the
+    # deletes impossible to miss before they happen.
+    if db_only:
+        print(f"\n[!] about to DELETE {len(db_only)} row(s) from {args.db}")
+        print("    A row is the only record of a skill's origin (repo owner/name/branch,")
+        print("    readme URL). Deleting loses those fields even when the skill folder is")
+        print("    still on disk (for example sitting in _archived/), and they cannot be")
+        print("    reconstructed afterwards. The backup below is the only way back.")
 
     backup_dir = os.path.join(os.path.dirname(args.db), "backups")
     os.makedirs(backup_dir, exist_ok=True)

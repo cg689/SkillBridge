@@ -110,7 +110,10 @@ $cfgSource = if ($existing -and $existing.source) {
 } else {
     '%USERPROFILE%\.cc-switch\skills'
 }
-$cfgCheckDb = if ($existing -and $null -ne $existing.check_db) { [bool]$existing.check_db } else { $true }
+# Default OFF: the check only reports, but it is an extra python invocation and
+# its finding ("database has rows the folder doesn't") is only meaningful to
+# someone who is going to act on it. Existing value is preserved.
+$cfgCheckDb = if ($existing -and $null -ne $existing.check_db) { [bool]$existing.check_db } else { $false }
 # Keep a hand-edited $comment: it is where machine-specific migration notes live
 # ("source moved to the physical skills dir", "these targets were removed on
 # purpose"). Regenerating the config must not erase that.
@@ -133,7 +136,7 @@ function ConvertTo-SkillBridgeConfig {
         $Exclude,
         [System.Collections.IDictionary]$Targets,
         $Autolink,
-        [bool]$CheckDb = $true
+        [bool]$CheckDb = $false
     )
     $esc = { param($s) ([string]$s).Replace('\', '\\').Replace('"', '\"') }
     $d = Get-AutolinkDefaults $Autolink
@@ -201,4 +204,17 @@ if ($excludedUnknown.Count -gt 0) {
         ($excludedUnknown -join ', '))
 }
 if ($keptExtra.Count -gt 0) { Write-Host "  kept extra : $($keptExtra -join ', ')" }
+
+# The scheduled sync runs hidden, so its failures are invisible. Read the record
+# it leaves behind; a `fail` here usually means the autolink task is broken.
+$lastRun = Read-RunStatus (Get-RunStatusPath (Join-Path $PSScriptRoot 'sync-skills.log'))
+if ($lastRun) {
+    $lastNote = if ($lastRun.message) { " - $($lastRun.message)" } else { '' }
+    switch ($lastRun.status) {
+        'fail' { Write-Warning "last sync run FAILED at $($lastRun.at)$lastNote" }
+        'warn' { Write-Warning "last sync run finished with a warning at $($lastRun.at)$lastNote" }
+        default { Write-Host "  last sync : ok at $($lastRun.at)" }
+    }
+}
+
 Write-Host "config.json written. Now run .\sync-skills.ps1 or double-click 同步CCSwitch技能.bat."

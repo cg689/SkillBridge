@@ -23,7 +23,8 @@ Every AI coding tool maintains its own `skills/` directory. Copying skills aroun
 - **Edits / removals propagate instantly** — a junction is a live reference, not a stale copy.
 - **New skills are linked automatically** at logon — at boot on Linux (Windows scheduled task / launchd / cron).
 - **Dead links are pruned** — when a skill is deleted, the links it left behind are cleaned up instead of accumulating.
-- **The CC Switch database stays in step** — `check-db-sync.py` registers skills the database never picked up, so they also reach Codex and appear in the CC Switch UI.
+- **CC Switch database drift is reported, never auto-repaired** — a row in `cc-switch.db` is the only record of a skill's origin (repo, branch, readme URL), so the sync reports drift and leaves the decision to you. Off by default (`"check_db": true` enables the report).
+- **Failures surface themselves** — the scheduled run is hidden, so every run records its outcome in `.skillbridge-status.json`; a failure also raises a toast, and `detect-tools` replays the last outcome on its next run.
 - **Idempotent & safe** — existing entries are never overwritten; a tool's own skills are never touched.
 - **Portable** — every path uses environment variables (`%USERPROFILE%`, `%APPDATA%`, `%HERMES_HOME%`), so it runs on any machine as-is.
 
@@ -123,7 +124,7 @@ See [支持的软件列表.md](支持的软件列表.md) for the full list of su
 
 1. **Junction / Symlink** — `<tool>/skills/<name> → ~/.cc-switch/skills/<name>`. A reference, not a copy: edit once, every tool reads the new version.
 2. **Sync script** — scans the source, creates a link in every configured target for each skill that is missing; skips anything that already exists. Links left behind by deleted skills are pruned (reported as `pruned=` in the summary).
-3. **Database alignment** — `check-db-sync.py` runs at the end of every sync and reconciles CC Switch's own skill database (`~/.cc-switch/cc-switch.db`) with the skills folder. CC Switch never rescans the filesystem, so a skill copied in by hand or generated locally is never registered on its own. Disable with `"check_db": false` in `config.json`.
+3. **Database drift report** — with `"check_db": true` (off by default), the end of every sync compares CC Switch's own skill database (`~/.cc-switch/cc-switch.db`) with the skills folder. CC Switch never rescans the filesystem, so a skill copied in by hand or generated locally is never registered on its own. The sync only **reports**: repairing means deleting rows, and a row is the only record of a skill's origin, so that call is yours — `python check-db-sync.py --fix` (backs the database up first).
 4. **Auto-trigger** — Windows Scheduled Task (`install-autolink.ps1`) or launchd/cron (`install-autolink.sh`).
 
 ## Repository Layout
@@ -135,10 +136,11 @@ SkillBridge/
 ├── detect-tools.sh         # same on macOS / Linux
 ├── sync-skills.ps1         # Windows sync script (junctions)
 ├── sync-skills.sh          # Unix sync script (symlinks)
-├── check-db-sync.py        # reconcile CC Switch's skill DB (called by sync)
+├── check-db-sync.py        # compare/report CC Switch's skill DB (called by sync)
 ├── install-autolink.ps1    # Windows: register scheduled task
 ├── install-autolink.sh     # Unix: register launchd / crontab
 ├── supported-tools.json    # catalog of supported tools (source of truth)
+├── .skillbridge-status.json  # last run outcome (written by sync-skills.*); gitignored
 ├── config.json             # generated per machine (run detect-tools); gitignored
 ├── config.example.json     # portable env-var based example (all targets)
 ├── 支持的软件列表.md         # supported tools & paths (中文)
@@ -195,8 +197,14 @@ Check that the folder is listed in `targets`. Also note that `Test-Path` does no
 **What if a copy is interrupted halfway (power loss, killed process)?**
 It cannot leave a dead end. The `.skillbridge-copy` ownership marker is written **before** the files are copied, so the partial directory is still recognised as ours and the next sync re-copies it in full. That run logs a `FAILED` line; the repairing run logs `updated=`.
 
+**Why does the sync no longer repair CC Switch's database by itself?**
+Because repairing means deleting rows, and a row is the only record of a skill's origin (repo owner/name/branch, readme URL). When a skill folder merely *moves* — archived into `_archived/`, renamed, or the source pointed at the wrong path — the old automatic repair deleted its row, and re-registering the folder later rebuilds the row with those fields blank. The skill still works, but where it came from is gone for good. Sync runs now **report** drift only (`"check_db": true`), and you decide whether the drift is real.
+
 **Can `check-db-sync.py --fix` wipe the database?**
-Not by accident. If the skills folder is empty (wrong `--source`, drive not mounted, folder moved) while the database still has rows, it **refuses** to repair, exits 2 and tells you to check `--source`. Pass `--allow-empty-source` to confirm "yes, I really deleted every skill". Every repair also backs the database up to `~/.cc-switch/backups/` first.
+Not by accident. If the skills folder is empty (wrong `--source`, drive not mounted, folder moved) while the database still has rows, it **refuses** to repair, exits 2 and tells you to check `--source`. Pass `--allow-empty-source` to confirm "yes, I really deleted every skill". Every repair also backs the database up to `~/.cc-switch/backups/` first. Run it by hand — nothing runs it for you any more.
+
+**The scheduled sync keeps failing and I never see it?**
+That is what `.skillbridge-status.json` is for. Every run overwrites it with `ok` / `warn` / `fail` plus a timestamp and message; failures also raise a Windows toast (or `notify-send` on Unix desktops), and `detect-tools` prints the last outcome when you run it. `SKILLBRIDGE_NO_NOTIFY=1` silences the toast; the status file is always written.
 
 ## Contributing
 

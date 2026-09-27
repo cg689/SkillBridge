@@ -132,7 +132,9 @@ cfg = {
         "at_logon": autolink["at_logon"] if "at_logon" in autolink else True,
         "interval_minutes": autolink["interval_minutes"] if "interval_minutes" in autolink else 0,
     },
-    "check_db": existing["check_db"] if "check_db" in existing else True,
+    # Default OFF: the check only reports, but it is an extra python invocation and
+    # its finding is only meaningful to someone who will act on it.
+    "check_db": existing["check_db"] if "check_db" in existing else False,
 }
 
 with open(config_path, "w", encoding="utf-8", newline="\n") as handle:
@@ -153,5 +155,26 @@ if excluded_unknown:
     )
 if kept_extra:
     print("  kept extra : %s" % ", ".join(kept_extra))
+
+# The scheduled sync runs from cron/launchd, where failures go nowhere. Read the
+# record it leaves behind; a `fail` here usually means the autolink entry is broken.
+status_path = os.path.join(
+    os.path.dirname(os.path.abspath(config_path)), ".skillbridge-status.json"
+)
+try:
+    with open(status_path, encoding="utf-8") as handle:
+        last = json.load(handle)
+    note = " - %s" % last["message"] if last.get("message") else ""
+    state = last.get("status")
+    when = last.get("at")
+    if state == "fail":
+        print("  WARNING   : last sync run FAILED at %s%s" % (when, note), file=sys.stderr)
+    elif state == "warn":
+        print("  WARNING   : last sync run finished with a warning at %s%s" % (when, note), file=sys.stderr)
+    elif when:
+        print("  last sync : ok at %s" % when)
+except (OSError, json.JSONDecodeError, KeyError):
+    pass
+
 print("config.json written. Now run ./sync-skills.sh")
 PY

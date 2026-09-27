@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Failure is no longer silent. Every run overwrites `.skillbridge-status.json`
+  with `ok` / `warn` / `fail`, a timestamp and a message; `fail` / `warn` also
+  raise a Windows toast (`notify-send` on Unix desktops), and `detect-tools`
+  replays the last outcome on its next run. Both scripts trap an unhandled
+  crash — previously a hidden scheduled task could die leaving nothing but a
+  process exit code — and early config / source errors record themselves the
+  same way. `SKILLBRIDGE_NO_NOTIFY=1` silences the toast; the status file is
+  always written.
 - `exclude` array in `config.json`: a permanent per-tool opt-out. A catalog tool
   listed there is never written to `targets`, and `detect-tools` will not add it
   back — not even with `-All` / `--all`. Unknown names are dropped with a warning.
@@ -35,6 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the .bat launchers and the scheduled task actually use), not just pwsh 7.
 
 ### Changed
+- `check-db-sync.py` is **report-only** when run from a sync, and `check_db`
+  now defaults to `false`. A row in `cc-switch.db` is the only record of a
+  skill's origin (repo owner/name/branch, readme URL); when a folder merely
+  moved — archived into `_archived/`, renamed, or a wrong `--source` — the old
+  automatic `--fix` deleted the row, and re-registering the folder later comes
+  back with those fields blank. Removing a row is a judgement call about CC
+  Switch's own data, so it is manual now: sync reports the drift, you read the
+  list, you run `python check-db-sync.py --fix` (it backs the DB up first and
+  spells out what the deletes cost). The empty-source refusal from 09-23 stays.
 - Copy refresh fingerprints every regular file except the marker (sorted by
   relative path), so a `scripts/`-only edit is picked up.
 - Unix copy mode copies file-by-file and skips symlinks, matching Windows.

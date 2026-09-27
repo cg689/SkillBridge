@@ -368,3 +368,70 @@ function Resolve-PythonExe {
     }
     return $null
 }
+
+function Get-RunStatusPath {
+    # Next to sync-skills.log, so one folder holds the whole run history.
+    param([string]$LogPath)
+    Join-Path (Split-Path -Parent $LogPath) '.skillbridge-status.json'
+}
+
+function Write-RunStatus {
+    # The scheduled run is hidden, so a failure is invisible unless it records
+    # itself somewhere a person will look. Overwritten every run on purpose:
+    # only the latest outcome matters.
+    param(
+        [string]$Path,
+        [ValidateSet('ok', 'warn', 'fail')][string]$Status,
+        [string]$Message = ''
+    )
+    try {
+        $record = [ordered]@{
+            status  = $Status
+            at      = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+            message = $Message
+        }
+        [IO.File]::WriteAllText(
+            $Path,
+            ($record | ConvertTo-Json -Compress -Depth 3),
+            (New-Object Text.UTF8Encoding($false)))
+    } catch {
+        # A failure to record a failure must not create a second one.
+    }
+}
+
+function Read-RunStatus {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    try {
+        return ([IO.File]::ReadAllText($Path) | ConvertFrom-Json)
+    } catch {
+        return $null
+    }
+}
+
+function Show-StatusToast {
+    # Surfaced for runs nobody is watching (the scheduled task runs hidden).
+    # Best effort: no desktop, or CI, means silently stay quiet.
+    param(
+        [string]$Title,
+        [string]$Message,
+        [ValidateSet('ok', 'warn', 'fail')][string]$Status = 'fail',
+        [int]$Seconds = 10
+    )
+    if ($Status -eq 'ok') { return }
+    if ($env:CI -or $env:SKILLBRIDGE_NO_NOTIFY) { return }
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $icon = New-Object System.Windows.Forms.NotifyIcon
+        $icon.Icon = [System.Drawing.SystemIcons]::Warning
+        $icon.BalloonTipTitle = $Title
+        $icon.BalloonTipText  = $Message
+        $icon.Visible = $true
+        $icon.ShowBalloonTip($Seconds * 1000)
+        # Without a wait, the process exits and the balloon dies with it.
+        Start-Sleep -Seconds $Seconds
+        $icon.Dispose()
+    } catch {
+        # No interactive desktop (or no WinForms): the status file is the record.
+    }
+}

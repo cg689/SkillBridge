@@ -31,7 +31,7 @@
 
 1. **Junction / Symlink（活链接）**：`<工具>/skills/<name> → ~/.cc-switch/skills/<name>`。因为是引用而非拷贝，源文件一改，所有工具立刻读到新版。
 2. **同步脚本（幂等补链 + 清理死链）**：扫描真源目录，对每个含 `SKILL.md` 的 skill，在配置的每个目标目录里**缺哪个补哪个**链接；已存在的一律跳过。删除 skill 后残留在目标目录的失效链接会被自动清理（见汇总里的 `pruned=`）。
-3. **数据库对齐**：同步末尾调用 `check-db-sync.py`，把 CC Switch 自己的技能库（`~/.cc-switch/cc-switch.db`）与技能目录对齐。CC Switch 不会重新扫描文件系统，所以手工拷进来或本地生成的 skill 不会自动登记——这一步负责补上。可在 `config.json` 里用 `"check_db": false` 关闭。
+3. **数据库漂移只报告、不自动修**：同步末尾调用 `check-db-sync.py`，对比 CC Switch 自己的技能库（`~/.cc-switch/cc-switch.db`）与技能目录。CC Switch 不会重新扫描文件系统，所以手工拷进来或本地生成的 skill 不会自动登记。但修复意味着删行，而**一行记录是 skill 来源信息（仓库、分支、README 链接）的唯一载体**，移走/归档过的文件夹被"顺手补删"后这些字段无法重建——所以同步只报告，修不修由你决定：日志里看到漂移后手动 `python check-db-sync.py --fix`（会自动先备份数据库）。默认关闭，`"check_db": true` 开启。
 4. **自动触发**：
    - Windows：`install-autolink.ps1` 注册计划任务（登录时触发，可选按分钟重复）。
    - macOS/Linux：`install-autolink.sh` 注册 launchd（macOS）或 crontab（Linux，开机时触发）。
@@ -45,7 +45,8 @@ SkillBridge/
 ├── detect-tools.sh         # 同上（macOS / Linux）
 ├── sync-skills.ps1         # Windows 同步脚本（junction）
 ├── sync-skills.sh          # Unix 同步脚本（symlink）
-├── check-db-sync.py        # 对齐 CC Switch 技能数据库（同步末尾自动调用）
+├── check-db-sync.py        # 对比/报告 CC Switch 技能数据库（同步末尾调用）
+├── .skillbridge-status.json # 最近一次运行结果（sync-skills.* 写入），不入库
 ├── install-autolink.ps1    # Windows：注册计划任务
 ├── install-autolink.sh     # Unix：注册 launchd / crontab
 ├── supported-tools.json    # 支持的工具目录（detect-tools 的唯一真源）
@@ -180,8 +181,14 @@ Cursor 为兼容还会读取 `~/.claude/skills`、`~/.codex/skills`、`~/.agents
 **拷贝到一半失败（断电、被中断）会怎样？**
 不会留下死结。归属标记 `.skillbridge-copy` 是**先写标记、再拷文件**，所以半截目录仍被认作"我们的"，下一次同步发现内容对不上就会整体重拷。汇总里那次会记一条 `FAILED`，修好后那次记 `updated=`。
 
+**为什么同步不再"顺手"修复 CC Switch 的数据库？**
+因为修复就是删行，而一行记录是 skill 来源信息（repo owner/名称/分支、README 链接）的唯一载体。skill 文件夹只是被挪走时——归档进 `_archived/`、改名、或 `--source` 指错——旧的自动修复会把它的行删掉，之后即使重新登记也只能填回空白的来源字段：技能还能用，但它从哪来彻底说不清了。现在同步**只报告**漂移（`"check_db": true`），是否修复由人判断。
+
 **`check-db-sync.py --fix` 会不会把数据库清空？**
-不会误清。如果技能目录是空的（路径写错、盘没挂上、目录被挪走）而数据库里还有记录，它会**拒绝修复**并以退出码 2 结束，提示你先检查 `--source`。确实要清空时显式加 `--allow-empty-source`。另外每次修复前都会先备份数据库到 `~/.cc-switch/backups/`。
+不会误清。如果技能目录是空的（路径写错、盘没挂上、目录被挪走）而数据库里还有记录，它会**拒绝修复**并以退出码 2 结束，提示你先检查 `--source`。确实要清空时显式加 `--allow-empty-source`。另外每次修复前都会先备份数据库到 `~/.cc-switch/backups/`。它只由人手动运行——没有任何脚本会自动调用它。
+
+**计划任务老是在失败，但我根本看不到？**
+这正是 `.skillbridge-status.json` 的用途。每次运行都会把它覆盖成 `ok` / `warn` / `fail` 外加时间和说明；失败时还会弹一个 Windows 通知（Unix 桌面用 `notify-send`），下次跑 `detect-tools` 也会把最近一次结果打出来。想安静点设 `SKILLBRIDGE_NO_NOTIFY=1`（只关通知，状态文件照写）。
 
 **同步时脚本报 `pruned=0`，但目录里明明有失效链接？**
 先确认该目录在 `targets` 里。另外：`Test-Path` 对 junction **不解析目标**，悬空的也返回 `True`，所以不能用它判断——脚本比对的是链接记录的 `Target` 路径。

@@ -8,3 +8,6 @@ config.json
 .DS_Store
 Thumbs.db
 
+
+# Machine-generated run record (last sync outcome, written by sync-skills.*)
+.skillbridge-status.json
