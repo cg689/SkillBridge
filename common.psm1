@@ -486,22 +486,69 @@ function Get-SkillFrontMatter {
     return [pscustomobject]@{ name = $name; description = $description }
 }
 
+function Get-SkillCatalog {
+    param([string]$Path = (Join-Path $PSScriptRoot 'skill-catalog.zh-CN.json'))
+    # Hand-maintained Chinese overlay for the dashboard's skill browser: a
+    # one-line intro and a category per skill. It is data, not authority — the
+    # skill's own SKILL.md is still what a tool reads, and the original
+    # description stays in the payload as a fallback.
+    $empty = [pscustomobject]@{
+        categories = @()
+        notes      = @{}   # skill name -> @{ cat = ''; desc = '' }
+        unknown    = @()   # category ids used by a skill but not declared
+        path       = $Path
+        loaded     = $false
+    }
+    if (-not (Test-Path -LiteralPath $Path)) { return $empty }
+
+    try {
+        $json = [IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    } catch {
+        # A broken hand-edited file must not take the whole skill browser down:
+        # the page falls back to each skill's own description.
+        Write-Verbose "skill-catalog: $($_.Exception.Message)"
+        return $empty
+    }
+    if ($null -eq $json -or $null -eq $json.categories -or $null -eq $json.skills) { return $empty }
+
+    $known = @{}
+    foreach ($c in @($json.categories)) {
+        if ($c.id) { $known[[string]$c.id] = $true }
+    }
+    $notes = @{}
+    foreach ($p in @($json.skills.PSObject.Properties)) {
+        $cat = [string]$p.Value.cat
+        if (-not $cat) { continue }
+        $notes[$p.Name] = [pscustomobject]@{ cat = $cat; desc = [string]$p.Value.desc }
+        if (-not $known.ContainsKey($cat)) { $empty.unknown += $cat }
+    }
+    $empty.categories = @($json.categories | ForEach-Object {
+        [pscustomobject]@{ id = [string]$_.id; name = [string]$_.name; desc = [string]$_.desc }
+    })
+    $empty.notes  = $notes
+    $empty.loaded = $true
+    return $empty
+}
+
 function Get-SkillBridgeSkills {
     param(
-        [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json')
+        [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json'),
+        [string]$CatalogPath = (Join-Path $PSScriptRoot 'skill-catalog.zh-CN.json')
     )
     # The per-skill view behind the dashboard's skill browser: what a skill is
-    # (name, description, how many files, how big, when it last changed) and
-    # where it landed (link or copy, per target). Deliberately separate from
-    # Get-SkillBridgeStatus: this reads 100+ SKILL.md files and walks every
-    # skill folder, which is far more work than the 15-second snapshot should
-    # pay for. The UI asks for it when the browser is opened, not every poll.
+    # (name, description, how many files, how big, when it last changed), which
+    # category the catalog puts it in, and where it landed (link or copy, per
+    # target). Deliberately separate from Get-SkillBridgeStatus: this reads 100+
+    # SKILL.md files and walks every skill folder, which is far more work than
+    # the 15-second snapshot should pay for. The UI asks for it when the browser
+    # is opened, not every poll.
     $result = [ordered]@{
         generated_at  = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
         source        = ''
         source_exists = $false
         count         = 0
         targets       = @()
+        categories    = @()
         skills        = @()
         error         = ''
     }
@@ -519,6 +566,16 @@ function Get-SkillBridgeSkills {
     }
 
     $src = $snapshot.source
+    $catalog = Get-SkillCatalog -Path $CatalogPath
+    $catName = @{}
+    foreach ($c in $catalog.categories) { $catName[$c.id] = $c.name }
+    # Skills the catalog says nothing about land in one bucket rather than
+    # disappearing from the list — an uncatalogued skill is a documentation gap,
+    # not something to hide.
+    $otherId = 'other'
+    $catCount = @{}
+    $catCovered = @{}
+
     # Same two rules as sync-skills.ps1: `_archived/` is not a skill, and a
     # folder without SKILL.md is not one either.
     $skillDirs = @(Get-ChildItem -LiteralPath $src -Directory -ErrorAction SilentlyContinue |
@@ -539,6 +596,11 @@ function Get-SkillBridgeSkills {
             if ($null -eq $modified -or $f.LastWriteTime -gt $modified) { $modified = $f.LastWriteTime }
         }
         $meta = Get-SkillFrontMatter (Join-Path $dir.FullName 'SKILL.md')
+        $note = $null
+        if ($catalog.notes.ContainsKey($dir.Name)) { $note = $catalog.notes[$dir.Name] }
+        $catId = if ($note -and $note.cat) { [string]$note.cat } else { $otherId }
+        $catCount[$catId] = 1 + $(if ($catCount.ContainsKey($catId)) { $catCount[$catId] } else { 0 })
+        $covered = $false
 
         # `has` maps target name -> what is actually on disk there ("link" or
         # "copy"); the mode the config asks for comes from result.targets, and
@@ -569,10 +631,20 @@ function Get-SkillBridgeSkills {
                 $missing += $t.name
             }
         }
+        # Fully covered = every configured target holds it. The category counts
+        # use it to say "12/12 个已同步" next to the category name.
+        if (@($missing).Count -eq 0) {
+            $covered = $true
+            $catCovered[$catId] = 1 + $(if ($catCovered.ContainsKey($catId)) { $catCovered[$catId] } else { 0 })
+        }
 
         $skills += [pscustomobject]@{
             name        = $dir.Name
             description = $meta.description
+            intro       = if ($note) { [string]$note.desc } else { '' }
+            cat         = $catId
+            cat_name    = if ($catName.ContainsKey($catId)) { $catName[$catId] } else { '其他' }
+            covered     = $covered
             files       = $files.Count
             size        = $size
             modified    = if ($modified) { $modified.ToString('yyyy-MM-dd HH:mm') } else { '' }
@@ -583,6 +655,24 @@ function Get-SkillBridgeSkills {
         }
     }
 
+    # Category summary in the catalog's order, then the catch-all last. Only
+    # categories that actually hold a skill are listed, so a category the user
+    # is not using does not clutter the filter bar.
+    $cats = @()
+    foreach ($c in $catalog.categories) {
+        if (-not $catCount.ContainsKey($c.id)) { continue }
+        $cats += [pscustomobject]@{
+            id = $c.id; name = $c.name; desc = $c.desc
+            count = [int]$catCount[$c.id]; covered = [int]$catCovered[$c.id]
+        }
+    }
+    if ($catCount.ContainsKey($otherId)) {
+        $cats += [pscustomobject]@{
+            id = $otherId; name = '其他'; desc = '中文分类表里还没有的技能，按源目录里的原始描述显示。'
+            count = [int]$catCount[$otherId]; covered = [int]$catCovered[$otherId]
+        }
+    }
+    $result.categories = @($cats)
     $result.count  = $skills.Count
     $result.skills = @($skills)
     return [pscustomobject]$result

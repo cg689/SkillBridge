@@ -76,7 +76,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\web-ui.ps1 -Port 9001 -NoB
 
 The page shows one card per configured target (skills found, links created, copies updated, dead links pruned, failures), the tail of `sync-skills.log`, and two actions: **立即同步** runs the real `sync-skills.ps1` and streams its summary, and **数据库检查** runs the same *report-only* CC Switch database comparison the sync does — it never deletes rows. Every card expands to the per-target detail of the last run. It refreshes the snapshot every 15 seconds.
 
-Below the target cards, the **技能库 (skill browser)** lists every skill in the source folder: its description folded out of `SKILL.md`, file count, size and last change, and which targets hold it — as a link or as a real copy. Search by name or description, sort by name / coverage / size / last change, or keep only the skills that are not everywhere yet, then expand a row for the detail. That list is read when the page opens, when you press 刷新, or with its own 重新读取 button; the 15-second poll deliberately leaves it alone, because reading 100+ `SKILL.md` files is seconds of work that a poll should not repeat. (A copy-mode chip drawn dashed means what is on disk disagrees with what `config.json` asks for.)
+An option bar under the title splits the page into two views: **同步状况** on the left (everything above) and **技能列表** on the right. Which one is open lives in the URL hash (`#skills`), so a reload or a bookmark comes back to the same view. The skill list reads 100+ `SKILL.md` files, so it is fetched when that view is first opened — or with its own 重新读取 button — and the 15-second poll leaves it alone.
+
+**技能库 (skill browser)** groups every skill in the source folder by category, with a **Chinese one-line intro** for each. The categories and the intros come from `skill-catalog.zh-CN.json`, a hand-maintained data file the dashboard reads on top of each `SKILL.md`; the skill's own description stays in the payload and is shown under the Chinese one, dimmed, so a skill the catalog has not caught up with still reads correctly instead of disappearing. Pick a category from the chips for a flat list, or stay on 全部 and fold a group away by clicking its header. Search matches the name, the Chinese intro and the original description; sort by name / coverage / size / last change, or keep only the skills that are not everywhere yet; expand a row for file count, size, last change, and which targets hold it as a link or as a real copy. (A copy-mode chip drawn dashed means what is on disk disagrees with what `config.json` asks for.)
 
 Two design points worth knowing:
 
@@ -159,6 +161,8 @@ SkillBridge/
 ├── check-db-sync.py        # compare/report CC Switch's skill DB (called by sync)
 ├── web-ui.ps1              # local dashboard server (Windows, loopback-only)
 ├── web-ui.html             # the dashboard page web-ui.ps1 serves
+├── skill-catalog.zh-CN.json   # dashboard overlay: category + Chinese intro per skill
+├── tools/                  # one-off build-script for skill-catalog.zh-CN.json
 ├── 启动WebUI.bat           # double-click to open the dashboard
 ├── install-autolink.ps1    # Windows: register scheduled task
 ├── install-autolink.sh     # Unix: register launchd / crontab

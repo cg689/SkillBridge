@@ -15,19 +15,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sync-skills.log`, and two actions: run a sync, or run the same *report-only*
   CC Switch database check the sync does. It refreshes every 15 seconds and
   stops with the console window or a button in the page.
-- **A skill browser in the dashboard.** A second section lists every skill in
-  the source: the description folded out of `SKILL.md`, file count, size, last
-  change, and which targets hold it — as a link or as a real copy. Search by
-  name or description, sort by name / coverage / size / last change, filter to
-  the ones that are not everywhere yet, and expand a row for the per-target
-  detail. Served by `GET /api/skills`, backed by the new
-  `Get-SkillBridgeSkills` and `Get-SkillFrontMatter` in `common.psm1` (the
-  latter joins the folded `>-` / `|` description scalars by hand — there is no
-  YAML dependency). It is read when the page opens, on 刷新 / after a driven
-  sync, and with the list's own 重新读取 button — deliberately **not** by the
-  15-second poll, since walking 100+ `SKILL.md` files is seconds of work a poll
-  should not repeat. A dashed copy chip means the shape on disk disagrees with
-  the mode `config.json` asks for.
+- **A skill browser in the dashboard**, behind its own option bar: the page is
+  split into 同步状况 on the left and 技能列表 on the right, with the open view
+  stored in the URL hash so a reload or a bookmark returns to it. The list is
+  grouped by category, with a **Chinese one-line intro** per skill coming from
+  the new `skill-catalog.zh-CN.json` — a hand-maintained overlay the dashboard
+  reads on top of each `SKILL.md`, never instead of it. A skill the catalog has
+  not caught up with falls into an 其他 bucket and shows its own (English)
+  description, dimmed, under where the Chinese intro would be, so it stays
+  readable instead of vanishing. Each row carries the description folded out of
+  `SKILL.md`, file count, size, last change, and which targets hold it — as a
+  link or as a real copy. Search by name, Chinese intro or description, sort by
+  name / coverage / size / last change, filter to the ones that are not
+  everywhere yet, fold a whole category away, or expand a row for the
+  per-target detail. Served by `GET /api/skills`, backed by
+  `Get-SkillBridgeSkills`, `Get-SkillFrontMatter` and `Get-SkillCatalog` in
+  `common.psm1` (the front-matter parser joins the folded `>-` / `|` description
+  scalars by hand — there is no YAML dependency). The list is read when its view
+  is first opened, on 刷新 / after a driven sync, and with its own 重新读取
+  button — deliberately **not** by the 15-second poll, since walking 100+
+  `SKILL.md` files is seconds of work a poll should not repeat. A dashed copy
+  chip means the shape on disk disagrees with the mode `config.json` asks for.
+- `skill-catalog.zh-CN.json`: 127 skills across 10 categories (敏捷研发流程,
+  规划与协作, 代码与架构, 界面与动效, 视觉与图文, 学术与论文, 调研与检索,
+  写作与内容, 商业方法论, 自动化与工具), each with a Chinese one-liner.
+  `tools/build-skill-catalog.py` is the one-off generator that produced it and
+  validates the categories; the runtime only reads the JSON.
 - `Get-SkillBridgeSkills` in `common.psm1`: the skill list behind that browser —
   one entry per source skill with its front matter, size, mtime and a compact
   target→kind map — so the page and the smoke suite share one implementation.

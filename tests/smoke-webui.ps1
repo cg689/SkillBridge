@@ -14,8 +14,11 @@
 #   * GET /api/status is the shared snapshot (source, skill count, per-target
 #     linked/missing) and it changes as the sync lands
 #   * GET /api/skills is the skill browser's payload: description folded out of
-#     the SKILL.md frontmatter, file count/size, and per-target link/copy/missing
-#     (asserted before AND after the sync, when the kinds change)
+#     the SKILL.md frontmatter, file count/size, the Chinese intro and category
+#     from skill-catalog.zh-CN.json (a skill the catalog omits falls back to the
+#     catch-all bucket with its own description), the category summary, and
+#     per-target link/copy/missing (asserted before AND after the sync, when the
+#     kinds and the coverage counts change)
 #   * GET /api/log?lines=N honours the tail size
 #   * POST /api/sync really runs sync-skills.ps1: the junction and the copy
 #     appear on disk, exit code 0, and the run record is refreshed
@@ -230,6 +233,25 @@ try {
     if ($page.text -notmatch '\.targets\s*\{[^}]*align-items:\s*start') {
         throw 'FAIL: .targets no longer sets align-items: start, so an expanded card stretches every card in its row again'
     }
+    # -- the option bar and its two views ------------------------------------
+    # The skill browser reads 100+ SKILL.md files, so it starts hidden and is
+    # fetched when its view is opened; a page that shows both views at once
+    # (or fetches the list with the page) has lost that split.
+    if ($page.text -notmatch 'data-view="sync"' -or $page.text -notmatch 'data-view="skills"') {
+        throw 'FAIL: the option bar no longer offers 同步状况 and 技能列表 as two views'
+    }
+    if ($page.text -notmatch 'id="view-skills"\s+hidden') {
+        throw 'FAIL: the skills view no longer starts hidden, so the page reads the skill list on every open'
+    }
+    if ($page.text -notmatch 'id="skill-cats"' -or $page.text -notmatch 'data-cat="all"') {
+        throw 'FAIL: the category filter (全部 + one chip per category) is gone from the skill view'
+    }
+    if ($page.text -notmatch '\.cat-chip\b' -or $page.text -notmatch '\.skill-group-head\b') {
+        throw 'FAIL: the skill view lost the styles for the category chips and the per-category group headers'
+    }
+    if ($page.text -notmatch 's\.intro' -or $page.text -notmatch 'skillState\.cat') {
+        throw 'FAIL: the skill list no longer renders the Chinese intro (`s.intro`) or filters by category'
+    }
 
     # -- no token, no API -----------------------------------------------------
     foreach ($m in @(
@@ -319,6 +341,31 @@ try {
     if (@($sk1.targets).Count -ne 2) {
         throw "FAIL: /api/skills expected 2 targets listed, got $(@($sk1.targets).Count)"
     }
+    # -- the Chinese catalog overlay -----------------------------------------
+    # demo-skill is a fixture, so it is in no category of the real
+    # skill-catalog.zh-CN.json: it has to fall through to the catch-all bucket
+    # with its own description as the intro, not vanish from the list.
+    foreach ($field in 'intro', 'cat', 'cat_name', 'covered') {
+        if ($null -eq $one.PSObject.Properties[$field]) {
+            throw "FAIL: /api/skills no longer returns $field"
+        }
+    }
+    if ([string]$one.intro -ne '') {
+        throw "FAIL: a skill the catalog says nothing about must not get an intro, got '$($one.intro)'"
+    }
+    if ($one.cat -ne 'other') { throw "FAIL: /api/skills filed an unknown skill under cat '$($one.cat)'" }
+    if ($one.cat_name -ne '其他') { throw "FAIL: the catch-all bucket is named '$($one.cat_name)'" }
+    if ($null -eq $sk1.PSObject.Properties['categories']) { throw 'FAIL: /api/skills no longer returns categories' }
+    if (@($sk1.categories).Count -ne 1) {
+        throw "FAIL: with one uncatalogued skill only the catch-all bucket should exist, got $(@($sk1.categories).Count)"
+    }
+    $bucket = @($sk1.categories)[0]
+    if ($bucket.id -ne 'other' -or $bucket.count -ne 1) {
+        throw "FAIL: the catch-all bucket reported id=$($bucket.id) count=$($bucket.count)"
+    }
+    if ($bucket.covered -ne 0) {
+        throw "FAIL: before the sync the skill is in no target, so the bucket must report covered=0, got $($bucket.covered)"
+    }
 
     # -- the log tail ---------------------------------------------------------
     $lg = Get-JsonResult (Invoke-Api -Method 'GET' -Path 'api/log?lines=3' -Token $Token) 'GET /api/log?lines=3'
@@ -383,6 +430,18 @@ try {
     $copyKind = $one2.has.'WebUiCopy'
     if ($linkKind -ne 'link') { throw "FAIL: WebUi holds '$linkKind' where a link was expected" }
     if ($copyKind -ne 'copy') { throw "FAIL: WebUiCopy holds '$copyKind' where a real copy was expected" }
+    if ($one2.covered -ne $true) {
+        throw "FAIL: after the sync the skill is in every target, so covered must be `true`, got '$($one2.covered)'"
+    }
+    if ([string]$one2.intro -ne '') {
+        throw "FAIL: the sync must not invent a Chinese intro, got '$($one2.intro)'"
+    }
+    # The bucket's coverage count has to follow the sync: 0 -> 1 is the number
+    # the category chip shows next to 其他, so a stale one is a lie on screen.
+    $bucket2 = @($sk2.categories)[0]
+    if ($bucket2.count -ne 1 -or $bucket2.covered -ne 1) {
+        throw "FAIL: the catch-all bucket reports count=$($bucket2.count) covered=$($bucket2.covered) after the sync, expected 1/1"
+    }
 
     # -- db-check must report, never repair ----------------------------------
     # The byte hash is the assertion: the user's rule is that nothing automated
