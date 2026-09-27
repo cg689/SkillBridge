@@ -8,6 +8,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Skills can be managed from the dashboard, and it acts on `config.json`'s
+  `source`** — the same folder CC Switch itself keeps its skills in.
+  `POST /api/skills/delete` (`Remove-SkillBridgeSkill` in `common.psm1`) removes
+  one skill folder; `POST /api/skills/add` (`Import-SkillBridgeSkillZip`)
+  installs the skills inside an uploaded `.zip` package there.
+  - Installing unpacks the package **entry by entry** into a staging folder
+    inside the source and then moves each skill out of it, so an install is a
+    rename rather than a copy that can stop half way. `.NET Framework`'s
+    `ExtractToDirectory` does not sanitise entry names, so every entry is checked
+    first: `..` traversal, an absolute path, a `GetFullPath` that leaves the
+    staging directory and a symbolic-link entry (which would otherwise land as a
+    regular file carrying link mode bits) are all refused before anything is
+    written; macOS archive noise (`__MACOSX/`, `._*`, `.DS_Store`) is skipped, and
+    both the packed size and the unpacked total are capped.
+  - A skill is a folder containing `SKILL.md` — the same rule the sync uses — so
+    one package may carry several skills and anything else in it is left behind;
+    a package that is a single skill at its root is named by the `name:` in its
+    front matter and warned about when that disagrees with its folder. A name
+    that already exists is **never** overwritten: it is reported as skipped,
+    because overwriting is how someone loses a skill they were editing. Whatever
+    happens, the staging folder is removed again, so a refused upload cannot
+    leave a phantom skill in the source.
+  - Deleting is refused unless the folder is provably a skill: an illegal folder
+    name (`CON`, `..`, a trailing dot), a folder that is not there, or a folder
+    without `SKILL.md` (i.e. somebody else's directory) deletes nothing. It is
+    *not* a sync: the targets then hold residuals, which the next sync prunes,
+    and the `cc-switch.db` row stays behind as drift the report-only check
+    shows — both stated in the UI before the button is pressed, because the
+    source folder is what every tool on the machine reads and there is no undo.
+- **A rebuilt dashboard page**, on top of a shadcn-style semantic token system
+  (`--background` / `--foreground` / `--card` / `--muted` / `--muted-foreground` /
+  `--border` / `--destructive`, one radius scale) so light and dark are one
+  stylesheet with two palettes instead of two designs (the top-bar button
+  switches, the choice is kept in `localStorage`). The hero, the target cards,
+  the option bar, the skill rows and the two new dialogs are all built from
+  those tokens. Interaction and accessibility work on top of that: a real ARIA
+  tablist (`role="tablist"` / `role="tab"` / `aria-selected` / `aria-controls`,
+  roving `tabindex`, ←/→/Home/End, the open view still in the URL hash); both
+  dialogs are `role="dialog"` + `aria-modal="true"` with the page behind them
+  made `inert`, a Tab trap, Escape to cancel, focus restored to the button that
+  opened them and never to the dialog box itself; a visible `:focus-visible`
+  ring on every control; `/` focuses the search box; a skeleton instead of an
+  empty panel while the skill list loads, all motion quieted under
+  `prefers-reduced-motion`. New in the page itself: the per-row trash button,
+  the 添加技能 dialog (a drop zone plus a hidden `.zip` file input, 32 MB
+  client-side cap, chunked base64 so a large package does not build a quadratic
+  string), a result list that reports what the upload added / skipped / refused,
+  and the destructive delete dialog that names the path, the file count and the
+  three consequences the page cannot otherwise show. Everything is still
+  inlined — no CDN, no build step, nothing fetched but the page's own API.
+- `tests/smoke-webui.ps1` now drives both new endpoints end to end over HTTP
+  against a throwaway source and asserts what is on disk afterwards: a valid
+  package (SKILL.md plus a nested folder), the same package again (skipped, and
+  the file already in the source is untouched), an entry that tries to escape
+  (`..\..\`) refused without abandoning the rest of the upload, non-zip bytes,
+  an illegal name, a missing skill, a folder without `SKILL.md`, `GET` answered
+  with 405, no token with 403, no body field with 400, a body past the cap with
+  413 — and that the server still answers afterwards, because the refused body
+  is drained or the response is lost to a reset. The page guards now also cover
+  the tablist, the token system, both dialogs and `#i-chevron` (the carets used
+  to be referenced but never defined, so every one of them rendered as an empty
+  box).
 - **A local dashboard** (`web-ui.ps1` + `web-ui.html`, started by double-clicking
   `启动WebUI.bat`): one page on `http://localhost:<port>/` showing the whole
   state of the sync — the source, a card per target (skills found, links

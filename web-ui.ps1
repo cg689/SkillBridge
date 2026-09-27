@@ -10,6 +10,8 @@
 #   POST /api/sync      run sync-skills.ps1 and return its output
 #   GET  /api/log       the tail of sync-skills.log
 #   POST /api/db-check  compare the skills folder with cc-switch.db (report only)
+#   POST /api/skills/delete   remove one skill folder from the source
+#   POST /api/skills/add      install the skills inside an uploaded .zip
 #   POST /api/stop      shut the server down
 #
 # Security has two layers, both of them load-bearing:
@@ -58,8 +60,13 @@ function Write-ServerLine {
 
 $script:Reasons = @{
     200 = 'OK'; 400 = 'Bad Request'; 403 = 'Forbidden'; 404 = 'Not Found'
-    405 = 'Method Not Allowed'; 411 = 'Length Required'; 500 = 'Internal Server Error'
+    405 = 'Method Not Allowed'; 411 = 'Length Required'; 413 = 'Payload Too Large'
+    500 = 'Internal Server Error'
 }
+# A request body is only ever a base64 zip inside JSON. 32 MB of zip is ~44 MB
+# of text once encoded, so this ceiling leaves room for the JSON around it and
+# refuses before the process has to buffer more.
+$MaxBodyBytes = 50331648   # 48 MB
 
 function Send-Response {
     param(
@@ -159,15 +166,37 @@ function Read-Request {
     # Drain the body even though nothing reads it: closing a socket with unread
     # bytes pending makes TCP send RST, and the client can lose the response we
     # are about to write.
+    $bodyBytes = @()
+    $bodyTooBig = $false
     if (-not $chunked -and $bodyLength -gt 0) {
-        $bodyBuffer = New-Object 'byte[]' $bodyLength
-        $got = if ($leftover -gt 0) { [Math]::Min($leftover, $bodyLength) } else { 0 }
+        # Bound the allocation before allocating it. The only body this API
+        # takes is a base64 zip inside JSON: 32 MB of zip is ~44 MB of text, so
+        # anything past this is refused instead of buffered — but the socket is
+        # still drained first, or the client never sees the refusal.
+        $readLength = $bodyLength
+        if ($bodyLength -gt $MaxBodyBytes) {
+            $readLength = $MaxBodyBytes
+            $bodyTooBig = $true
+        }
+        $bodyBuffer = New-Object 'byte[]' $readLength
+        $got = if ($leftover -gt 0) { [Math]::Min($leftover, $readLength) } else { 0 }
         if ($got -gt 0) { [Array]::Copy($all, $bodyStart, $bodyBuffer, 0, $got) }
         $bodyDeadline = (Get-Date).AddSeconds(20)
-        while ($got -lt $bodyLength -and (Get-Date) -lt $bodyDeadline) {
-            $n = $stream.Read($bodyBuffer, $got, $bodyLength - $got)
+        while ($got -lt $readLength -and (Get-Date) -lt $bodyDeadline) {
+            $n = $stream.Read($bodyBuffer, $got, $readLength - $got)
             if ($n -le 0) { break }
             $got += $n
+        }
+        $bodyBytes = $bodyBuffer
+        if ($bodyTooBig) {
+            # Swallow the rest without keeping it.
+            $drain = New-Object 'byte[]' 65536
+            $drained = $got
+            while ($drained -lt $bodyLength -and (Get-Date) -lt $bodyDeadline) {
+                $n = $stream.Read($drain, 0, [Math]::Min(65536, $bodyLength - $drained))
+                if ($n -le 0) { break }
+                $drained += $n
+            }
         }
     }
 
@@ -188,8 +217,9 @@ function Read-Request {
         path    = $path
         query   = $query
         headers = $headers
-        chunked = $chunked
-        body    = ''
+        chunked   = $chunked
+        body      = $bodyBytes
+        bodyTooBig = $bodyTooBig
     }
 }
 
@@ -255,6 +285,37 @@ function Invoke-DbCheck {
     }
 }
 
+function Read-JsonField {
+    # Reads one string field out of a small JSON request body. A malformed body
+    # returns '' rather than throwing: the caller answers 400, not a stack trace.
+    param([byte[]]$Body, [string]$Field)
+    if ($null -eq $Body -or $Body.Length -eq 0) { return '' }
+    try {
+        $obj = [Text.Encoding]::UTF8.GetString($Body) | ConvertFrom-Json
+    } catch { return '' }
+    if ($null -eq $obj) { return '' }
+    $prop = $obj.PSObject.Properties[$Field]
+    if ($null -eq $prop -or $null -eq $prop.Value) { return '' }
+    return ([string]$prop.Value).Trim()
+}
+
+function Read-Base64Field {
+    # Reads the "data" field (a base64 zip) out of the request body, or $null
+    # when it is missing or not valid base64. $null is the only "no" this
+    # answers on purpose: an empty array is a valid body that carries no zip.
+    param([byte[]]$Body)
+    if ($null -eq $Body -or $Body.Length -eq 0) { return $null }
+    try {
+        $obj = [Text.Encoding]::UTF8.GetString($Body) | ConvertFrom-Json
+    } catch { return $null }
+    if ($null -eq $obj) { return $null }
+    $prop = $obj.PSObject.Properties['data']
+    if ($null -eq $prop -or $null -eq $prop.Value) { return $null }
+    $b64 = (([string]$prop.Value) -replace '\s', '')
+    if (-not $b64) { return $null }
+    try { return [Convert]::FromBase64String($b64) } catch { return $null }
+}
+
 function Handle-Request {
     param($req)
     if ($req.path -eq '/') {
@@ -274,6 +335,10 @@ function Handle-Request {
     }
     if ($req.chunked) {
         Send-Json -Context $req -Code 411 -Value @{ error = 'send Content-Length, not chunked' }
+        return
+    }
+    if ($req.bodyTooBig) {
+        Send-Json -Context $req -Code 413 -Value @{ error = "the request body is over the $($MaxBodyBytes / 1MB) MB limit" }
         return
     }
 
@@ -321,6 +386,54 @@ function Handle-Request {
         '^/api/stop$' {
             Send-Json -Context $req -Value @{ stopping = $true }
             $script:Stopping = $true
+            return
+        }
+        '^/api/skills/delete$' {
+            # Deleting a source skill is destructive and there is no undo, so the
+            # route itself does nothing clever: it only forwards the caller's
+            # decision to common.psm1, which re-checks everything (name, that the
+            # folder is a skill) and reports what it removed.
+            if ($req.method -ne 'POST') {
+                Send-Json -Context $req -Code 405 -Value @{ error = 'POST only' }
+                return
+            }
+            $name = Read-JsonField -Body $req.body -Field 'name'
+            if (-not $name) {
+                Send-Json -Context $req -Code 400 -Value @{ error = 'send JSON with a "name" field' }
+                return
+            }
+            Write-ServerLine "delete requested: $name" 'Yellow'
+            $result = Remove-SkillBridgeSkill -Name $name -ConfigPath $ConfigPath
+            if ($result.ok) {
+                Write-ServerLine ("deleted {0}: {1} files, {2:N0} bytes" -f $result.name, $result.files, $result.size) 'Green'
+            } else {
+                Write-ServerLine ("delete refused ({0}): {1}" -f $name, $result.error) 'Red'
+            }
+            Send-Json -Context $req -Value $result
+            return
+        }
+        '^/api/skills/add$' {
+            if ($req.method -ne 'POST') {
+                Send-Json -Context $req -Code 405 -Value @{ error = 'POST only' }
+                return
+            }
+            $bytes = Read-Base64Field -Body $req.body
+            if ($null -eq $bytes) {
+                Send-Json -Context $req -Code 400 -Value @{ error = 'send JSON with a base64 "data" field' }
+                return
+            }
+            Write-ServerLine ("import requested: {0:N1} KB of package" -f ($bytes.Length / 1KB)) 'Cyan'
+            $result = Import-SkillBridgeSkillZip -Bytes $bytes -ConfigPath $ConfigPath
+            if ($result.ok) {
+                Write-ServerLine ("imported: " + (($result.added) -join ', ')) 'Green'
+            } else {
+                # No prefix: common.psm1 already says what went wrong, and a
+                # doubled prefix ("import failed: import failed: ...") reads like
+                # two failures.
+                Write-ServerLine $result.error 'Red'
+            }
+            foreach ($w in @($result.warnings)) { Write-ServerLine ("import warning: " + $w) 'Yellow' }
+            Send-Json -Context $req -Value $result
             return
         }
     }

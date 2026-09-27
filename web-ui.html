@@ -7,94 +7,176 @@
 <link rel="icon" href="data:,">
 <title>SkillBridge · CC Switch 技能同步控制台</title>
 <style>
+  /* ---------------------------------------------------------------- tokens
+     Semantic names first, values second: every rule below asks for "the colour
+     of a card" or "the colour of text on a card", never a hex. That is what
+     makes the light theme a different palette instead of a second page.
+
+     The two themes are `:root` (dark, the default) and
+     `html[data-theme="light"]`. Nothing else in the file branches on theme. */
   :root {
-    --bg:        #0b0d12;
-    --bg-glow-1: rgba(79, 209, 197, .10);
-    --bg-glow-2: rgba(96, 165, 250, .07);
-    --surface:   #12151d;
-    --surface-2: #171b25;
-    --surface-3: #1d222e;
-    --border:    #232936;
-    --border-2:  #2e3547;
-    --text:      #e7eaf2;
-    --text-dim:  #aeb6c6;
-    --muted:     #7d869a;
-    --accent:    #4fd1c5;
-    --accent-2:  #38b2ac;
-    --ok:        #34d399;
-    --warn:      #fbbf24;
-    --fail:      #fb7185;
-    --info:      #60a5fa;
-    --mono:      "Cascadia Mono", "JetBrains Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
-    --sans:      "Segoe UI", system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB",
-                 "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-    --radius:    14px;
-    --shadow:    0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    color-scheme: dark;
+    --background:  #0b0d12;
+    --foreground:  #e7eaf2;
+    --card:        #12151d;
+    --card-2:      #171b25;
+    --muted:       #1a1f2b;
+    --muted-foreground: #7d869a;
+    --popover:     #141926;
+    --border:      #232936;
+    --border-2:    #2e3547;
+    --input:       #2a3140;
+    --ring:        rgba(79, 209, 197, 0.55);
+    --primary:     #4fd1c5;
+    --primary-foreground: #05231f;
+    --primary-text: #b8f4ee;
+    --primary-soft: rgba(79, 209, 197, 0.13);
+    --primary-soft-strong: rgba(79, 209, 197, 0.26);
+    --primary-border: rgba(79, 209, 197, 0.42);
+    --secondary:   #1d222e;
+    --secondary-foreground: #aeb6c6;
+    --destructive: #fb7185;
+    --destructive-foreground: #2c0a11;
+    --destructive-text: #ffb3bd;
+    --destructive-soft: rgba(251, 113, 133, 0.11);
+    --destructive-border: rgba(251, 113, 133, 0.45);
+    --ok:    #34d399; --ok-text:    #6ee7b7; --ok-soft:    rgba(52, 211, 153, 0.10);
+    --warn:  #fbbf24; --warn-text:  #ffdf9e; --warn-soft:  rgba(251, 191, 36, 0.10);
+    --fail:  #fb7185; --fail-text:  #ffb3bd; --fail-soft:  rgba(251, 113, 133, 0.10);
+    --info:  #60a5fa; --info-text:  #bfdbfe; --info-soft:  rgba(96, 165, 250, 0.10);
+    --glow-1: rgba(79, 209, 197, 0.10);
+    --glow-2: rgba(96, 165, 250, 0.07);
+    --topbar-bg: rgba(11, 13, 18, 0.72);
+    --code-bg: #0d1016;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+    --shadow-lg: 0 24px 60px -18px rgba(0, 0, 0, 0.75), 0 2px 6px rgba(0, 0, 0, 0.45);
+    --radius:   14px;
+    --radius-sm: calc(var(--radius) - 5px);
+    --radius-lg: calc(var(--radius) + 6px);
+    --mono: "Cascadia Mono", "JetBrains Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+    --sans: "Segoe UI", system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB",
+            "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  }
+  /* Light theme. Same names, different values: a card is white here and near
+     black there, and every accent that was a pale tint on dark becomes a dark
+     tone on white so the contrast survives the swap. */
+  html[data-theme="light"] {
+    color-scheme: light;
+    --background:  #f4f6f9;
+    --foreground:  #131822;
+    --card:        #ffffff;
+    --card-2:      #f7f9fc;
+    --muted:       #eef1f6;
+    --muted-foreground: #5b6577;
+    --popover:     #ffffff;
+    --border:      #e3e7ee;
+    --border-2:    #d3dae4;
+    --input:       #cfd6e0;
+    --ring:        rgba(13, 148, 136, 0.45);
+    --primary:     #0d9488;
+    --primary-foreground: #ffffff;
+    --primary-text: #0f766e;
+    --primary-soft: rgba(13, 148, 136, 0.08);
+    --primary-soft-strong: rgba(13, 148, 136, 0.16);
+    --primary-border: rgba(13, 148, 136, 0.38);
+    --secondary:   #eef1f6;
+    --secondary-foreground: #475062;
+    --destructive: #dc2626;
+    --destructive-foreground: #ffffff;
+    --destructive-text: #b42318;
+    --destructive-soft: rgba(220, 38, 38, 0.07);
+    --destructive-border: rgba(220, 38, 38, 0.35);
+    --ok:    #059669; --ok-text:    #047857; --ok-soft:    rgba(5, 150, 105, 0.09);
+    --warn:  #b45309; --warn-text:  #92400e; --warn-soft:  rgba(180, 83, 9, 0.09);
+    --fail:  #dc2626; --fail-text:  #b42318; --fail-soft:  rgba(220, 38, 38, 0.07);
+    --info:  #2563eb; --info-text:  #1d4ed8; --info-soft:  rgba(37, 99, 235, 0.08);
+    --glow-1: rgba(13, 148, 136, 0.07);
+    --glow-2: rgba(37, 99, 235, 0.05);
+    --topbar-bg: rgba(255, 255, 255, 0.82);
+    --code-bg: #f2f5f9;
+    --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+    --shadow-md: 0 1px 2px rgba(16, 24, 40, 0.07), 0 10px 26px -14px rgba(16, 24, 40, 0.22);
+    --shadow-lg: 0 24px 60px -18px rgba(16, 24, 40, 0.3), 0 2px 6px rgba(16, 24, 40, 0.08);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
     background:
-      radial-gradient(1100px 520px at 12% -10%, var(--bg-glow-1), transparent 60%),
-      radial-gradient(900px 480px at 95% 0%, var(--bg-glow-2), transparent 55%),
-      var(--bg);
-    color: var(--text);
+      radial-gradient(1100px 520px at 12% -10%, var(--glow-1), transparent 60%),
+      radial-gradient(900px 480px at 95% 0%, var(--glow-2), transparent 55%),
+      var(--background);
+    color: var(--foreground);
     font-family: var(--sans);
     font-size: 14px;
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     min-height: 100vh;
   }
-  a { color: var(--accent); }
+  a { color: var(--primary-text); }
+  /* One focus ring for the whole page, and only for keyboard users: :focus
+     would ring every mouse click, which is noise, and a missing ring makes the
+     page unusable without a mouse. */
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  button:focus-visible, [role="button"]:focus-visible { outline-offset: 2px; }
+  ::selection { background: var(--primary-soft-strong); }
 
   /* ------------------------------------------------------------- top bar */
   .topbar {
     position: sticky; top: 0; z-index: 20;
-    display: flex; align-items: center; gap: 14px;
-    padding: 12px 22px;
-    background: rgba(11,13,18,.72);
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 22px;
+    background: var(--topbar-bg);
     backdrop-filter: blur(14px) saturate(140%);
     border-bottom: 1px solid var(--border);
   }
   .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
   .brand svg { flex: none; }
   .brand-title { font-weight: 650; font-size: 15px; letter-spacing: .2px; }
-  .brand-sub { color: var(--muted); font-size: 12px; margin-top: -2px; }
+  .brand-sub { color: var(--muted-foreground); font-size: 12px; margin-top: -2px; }
   .topbar-spacer { flex: 1; }
   .pill {
     display: inline-flex; align-items: center; gap: 7px;
     padding: 5px 12px 5px 10px; border-radius: 999px;
     font-size: 12.5px; font-weight: 600; white-space: nowrap;
-    border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text-dim);
+    border: 1px solid var(--border-2); background: var(--muted); color: var(--secondary-foreground);
   }
   .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
-  .pill.ok    { color: var(--ok);   border-color: rgba(52,211,153,.35);  background: rgba(52,211,153,.08); }
-  .pill.warn  { color: var(--warn); border-color: rgba(251,191,36,.35);  background: rgba(251,191,36,.08); }
-  .pill.fail  { color: var(--fail); border-color: rgba(251,113,133,.35); background: rgba(251,113,133,.08); }
-  .pill.info  { color: var(--info); border-color: rgba(96,165,250,.35);  background: rgba(96,165,250,.08); }
+  .pill.ok    { color: var(--ok-text);   border-color: var(--ok-border, var(--border-2));   background: var(--ok-soft); }
+  .pill.warn  { color: var(--warn-text); border-color: var(--warn-border, var(--border-2)); background: var(--warn-soft); }
+  .pill.fail  { color: var(--fail-text); border-color: var(--fail-border, var(--border-2)); background: var(--fail-soft); }
+  .pill.info  { color: var(--info-text); border-color: var(--info-border, var(--border-2)); background: var(--info-soft); }
   .pill.warn .dot, .pill.fail .dot { animation: pulse 1.6s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.82); } }
 
   .btn {
     display: inline-flex; align-items: center; gap: 7px;
-    padding: 7px 13px; border-radius: 10px; cursor: pointer;
-    border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text-dim);
+    padding: 7px 13px; border-radius: var(--radius-sm); cursor: pointer;
+    border: 1px solid var(--border-2); background: var(--muted); color: var(--secondary-foreground);
     font: inherit; font-size: 13px; font-weight: 550;
-    transition: background .15s, color .15s, border-color .15s, transform .06s;
+    transition: background .15s, color .15s, border-color .15s, transform .06s, box-shadow .15s;
   }
-  .btn:hover { background: var(--surface-3); color: var(--text); border-color: #3a4459; }
+  .btn:hover { background: var(--secondary); color: var(--foreground); border-color: var(--input); }
   .btn:active { transform: translateY(1px); }
   .btn:disabled { opacity: .5; cursor: default; transform: none; }
   .btn.primary {
-    background: linear-gradient(180deg, rgba(79,209,197,.20), rgba(79,209,197,.10));
-    border-color: rgba(79,209,197,.45); color: #b8f4ee;
+    background: var(--primary-soft-strong); border-color: var(--primary-border); color: var(--primary-text);
   }
-  .btn.primary:hover { background: linear-gradient(180deg, rgba(79,209,197,.30), rgba(79,209,197,.16)); color: #dffbf7; }
-  .btn.danger:hover { border-color: rgba(251,113,133,.5); color: var(--fail); }
+  .btn.primary:hover { background: var(--primary-soft-strong); color: var(--primary-text); border-color: var(--primary); }
+  .btn.danger { color: var(--destructive-text); }
+  .btn.danger:hover { border-color: var(--destructive-border); background: var(--destructive-soft); color: var(--destructive-text); }
+  .btn.ghost { border-color: transparent; background: transparent; }
+  .btn.ghost:hover { background: var(--muted); }
+  /* Icon-only buttons still need a name: these carry title + aria-label. */
+  .btn.icon-only { padding: 7px; }
   /* Second-click confirmation for 停止. A window.confirm() would also work, but
      it blocks the page's JS thread while it is open - the poll stops, the
      animations stop, everything waits for one click. */
-  .btn.armed { border-color: rgba(251,113,133,.65); color: var(--fail); background: rgba(251,113,133,.12); }
+  .btn.armed { border-color: var(--destructive-border); color: var(--destructive-text); background: var(--destructive-soft); }
   .btn svg { flex: none; }
   .btn .spin { display: none; }
   .btn.busy .spin { display: block; animation: rot .9s linear infinite; }
@@ -102,41 +184,41 @@
   @keyframes rot { to { transform: rotate(360deg); } }
 
   /* -------------------------------------------------------------- layout */
-  main { max-width: 1360px; margin: 0 auto; padding: 26px 22px 60px; }
+  main { max-width: 1360px; margin: 0 auto; padding: 22px 22px 60px; }
   .section-head {
-    display: flex; align-items: baseline; gap: 10px;
-    margin: 30px 2px 14px;
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    margin: 26px 2px 12px;
   }
-  .section-head h2 { font-size: 13px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0; }
-  .section-head .hint { font-size: 12px; color: var(--muted); }
+  .section-head h2 { font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted-foreground); margin: 0; }
+  .section-head .hint { font-size: 12px; color: var(--muted-foreground); }
 
   .card {
-    background: linear-gradient(180deg, var(--surface), var(--surface-2));
+    background: var(--card);
     border: 1px solid var(--border); border-radius: var(--radius);
-    box-shadow: var(--shadow);
+    box-shadow: var(--shadow-sm);
   }
 
   /* ----------------------------------------------------------------- hero */
   .hero { padding: 20px 22px; display: flex; flex-wrap: wrap; gap: 18px 26px; align-items: flex-start; }
   .hero-main { min-width: 260px; flex: 1 1 320px; }
   .hero-state { font-size: 26px; font-weight: 700; letter-spacing: .2px; display: flex; align-items: center; gap: 12px; }
-  .hero-state .ring { width: 12px; height: 12px; border-radius: 50%; flex: none; box-shadow: 0 0 0 4px rgba(52,211,153,.12); }
+  .hero-state .ring { width: 12px; height: 12px; border-radius: 50%; flex: none; box-shadow: 0 0 0 4px var(--ok-soft); }
   .hero-state.ok   .ring { background: var(--ok); }
-  .hero-state.warn .ring { background: var(--warn); box-shadow: 0 0 0 4px rgba(251,191,36,.12); }
-  .hero-state.fail .ring { background: var(--fail); box-shadow: 0 0 0 4px rgba(251,113,133,.12); }
-  .hero-sub { color: var(--text-dim); margin-top: 6px; }
+  .hero-state.warn .ring { background: var(--warn); box-shadow: 0 0 0 4px var(--warn-soft); }
+  .hero-state.fail .ring { background: var(--fail); box-shadow: 0 0 0 4px var(--fail-soft); }
+  .hero-sub { color: var(--secondary-foreground); margin-top: 6px; }
   .hero-side { flex: 1 1 420px; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 18px; }
   .kv { min-width: 0; }
-  .kv .k { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
-  .kv .v { font-family: var(--mono); font-size: 12.5px; color: var(--text); word-break: break-all; }
+  .kv .k { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted-foreground); }
+  .kv .v { font-family: var(--mono); font-size: 12.5px; color: var(--foreground); word-break: break-all; }
   .kv .v.plain { font-family: var(--sans); }
 
   .banner {
-    margin: 0 0 16px; padding: 11px 14px; border-radius: 12px;
-    border: 1px solid rgba(251,113,133,.4); background: rgba(251,113,133,.09);
-    color: #ffd9de; font-size: 13px;
+    margin: 0 0 16px; padding: 11px 14px; border-radius: var(--radius-sm);
+    border: 1px solid var(--destructive-border); background: var(--destructive-soft);
+    color: var(--destructive-text); font-size: 13px;
   }
-  .banner.info { border-color: rgba(96,165,250,.35); background: rgba(96,165,250,.09); color: #d5e6ff; }
+  .banner.info { border-color: var(--primary-border); background: var(--primary-soft); color: var(--primary-text); }
   .banner code { font-family: var(--mono); font-size: 12px; }
 
   /* ---------------------------------------------------------------- stats */
@@ -144,16 +226,16 @@
   .stat { padding: 14px 16px 13px; border-radius: var(--radius); position: relative; overflow: hidden; }
   .stat::before {
     content: ""; position: absolute; inset: 0 0 auto 0; height: 2px;
-    background: linear-gradient(90deg, var(--accent), transparent 70%); opacity: .55;
+    background: linear-gradient(90deg, var(--primary), transparent 70%); opacity: .55;
   }
   .stat.warn::before  { background: linear-gradient(90deg, var(--warn), transparent 70%); }
   .stat.fail::before  { background: linear-gradient(90deg, var(--fail), transparent 70%); }
-  .stat .label { font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+  .stat .label { font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted-foreground); }
   .stat .value { font-size: 27px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; margin-top: 4px; }
-  .stat .note { font-size: 12px; color: var(--text-dim); margin-top: 2px; min-height: 18px; }
-  .stat.ok   .value { color: var(--ok); }
-  .stat.warn .value { color: var(--warn); }
-  .stat.fail .value { color: var(--fail); }
+  .stat .note { font-size: 12px; color: var(--secondary-foreground); margin-top: 2px; min-height: 18px; }
+  .stat.ok   .value { color: var(--ok-text); }
+  .stat.warn .value { color: var(--warn-text); }
+  .stat.fail .value { color: var(--fail-text); }
 
   /* ------------------------------------------------------------- targets */
   /* align-items: start on purpose: the default `stretch` makes every card in a
@@ -166,7 +248,7 @@
     transition: border-color .15s, transform .12s, background .15s;
   }
   .target:hover { border-color: var(--border-2); transform: translateY(-1px); }
-  .target.open { border-color: rgba(79,209,197,.4); }
+  .target.open { border-color: var(--primary-border); }
   .target.has-issues { border-left: 2px solid var(--warn); }
   .target.missing-dir { border-style: dashed; }
   .target-head { display: flex; align-items: center; gap: 8px; }
@@ -174,65 +256,71 @@
   .badge {
     font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
     padding: 2.5px 7px; border-radius: 6px; flex: none;
-    border: 1px solid var(--border-2); color: var(--muted); background: var(--surface-3);
+    border: 1px solid var(--border-2); color: var(--muted-foreground); background: var(--muted);
   }
-  .badge.junction { color: #7fd8cf; border-color: rgba(79,209,197,.35); background: rgba(79,209,197,.1); }
-  .badge.copy     { color: #9ec1ff; border-color: rgba(96,165,250,.35); background: rgba(96,165,250,.1); }
+  .badge.junction { color: var(--primary-text); border-color: var(--primary-border); background: var(--primary-soft); }
+  .badge.copy     { color: var(--info-text); border-color: var(--primary-border); background: var(--info-soft); }
   .target-path {
-    font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted-foreground);
     margin-top: 6px; word-break: break-all;
   }
-  .bar { height: 5px; border-radius: 99px; background: var(--surface-3); margin-top: 10px; overflow: hidden; }
-  .bar > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent-2), var(--accent)); transition: width .5s cubic-bezier(.4,0,.2,1); }
-  .bar.partial > i { background: linear-gradient(90deg, #b98a1e, var(--warn)); }
+  .bar { height: 5px; border-radius: 99px; background: var(--muted); margin-top: 10px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--primary), var(--info)); transition: width .5s cubic-bezier(.4,0,.2,1); }
+  .bar.partial > i { background: linear-gradient(90deg, var(--warn), var(--warn)); }
   .target-foot { display: flex; align-items: baseline; gap: 10px; margin-top: 9px; flex-wrap: wrap; }
   .target-count { font-size: 13px; font-variant-numeric: tabular-nums; }
   .target-count b { font-size: 15px; font-weight: 700; }
   .target-flags { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
   .flag {
     font-size: 11px; padding: 1.5px 7px; border-radius: 99px; white-space: nowrap;
-    border: 1px solid var(--border-2); color: var(--text-dim); background: var(--surface-3);
+    border: 1px solid var(--border-2); color: var(--secondary-foreground); background: var(--muted);
   }
-  .flag.warn  { color: var(--warn); border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.08); }
-  .flag.fail  { color: var(--fail); border-color: rgba(251,113,133,.35); background: rgba(251,113,133,.08); }
-  .flag.ok    { color: var(--ok);   border-color: rgba(52,211,153,.3);  background: rgba(52,211,153,.08); }
+  .flag.warn  { color: var(--warn-text); border-color: var(--warn-border, var(--border-2)); background: var(--warn-soft); }
+  .flag.fail  { color: var(--fail-text); border-color: var(--fail-border, var(--border-2)); background: var(--fail-soft); }
+  .flag.ok    { color: var(--ok-text);   border-color: var(--ok-border, var(--border-2));   background: var(--ok-soft); }
 
   .detail { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border-2); }
   .target.open .detail { display: block; }
-  .detail h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 650; }
-  .detail h4 .n { color: var(--text-dim); }
+  .detail h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); font-weight: 650; }
+  .detail h4 .n { color: var(--secondary-foreground); }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
   .chip {
     font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 6px;
-    background: var(--surface-3); border: 1px solid var(--border); color: var(--text-dim);
+    background: var(--muted); border: 1px solid var(--border); color: var(--secondary-foreground);
   }
-  .chip.more { color: var(--muted); font-style: italic; }
-  .chip.hot { color: #ffd9de; border-color: rgba(251,113,133,.4); background: rgba(251,113,133,.1); }
-  .detail ul.issues { margin: 0; padding-left: 18px; color: var(--text-dim); font-size: 12.5px; }
+  .chip.more { color: var(--muted-foreground); font-style: italic; }
+  .chip.hot { color: var(--destructive-text); border-color: var(--destructive-border); background: var(--destructive-soft); }
+  .detail ul.issues { margin: 0; padding-left: 18px; color: var(--secondary-foreground); font-size: 12.5px; }
   .detail ul.issues li { margin-bottom: 3px; }
-  .detail-empty { color: var(--muted); font-size: 12.5px; }
+  .detail-empty { color: var(--muted-foreground); font-size: 12.5px; }
 
-  /* ---------------------------------------------------------- tab bar */
+  /* ------------------------------------------------- option bar (tablist)
+     A real ARIA tablist: the two views are panels, the option bar switches
+     between them, and ←/→ move along it. The count on the skill tab is the
+     number the panel will show, so it is announced with the tab name. */
   .tabs {
     display: flex; align-items: stretch; gap: 4px;
-    margin: 0 2px 20px; padding: 4px;
-    background: var(--surface-2); border: 1px solid var(--border);
+    margin: 0 2px 18px; padding: 4px;
+    background: var(--card-2); border: 1px solid var(--border);
     border-radius: 12px; width: max-content; max-width: 100%;
   }
   .tab {
     display: inline-flex; align-items: center; gap: 7px;
     padding: 8px 16px; border: 0; border-radius: 9px; cursor: pointer;
-    background: transparent; color: var(--muted);
+    background: transparent; color: var(--muted-foreground);
     font: inherit; font-size: 13.5px; font-weight: 600;
-    transition: background .15s, color .15s;
+    transition: background .15s, color .15s, box-shadow .15s;
   }
-  .tab:hover { color: var(--text); background: rgba(255,255,255,.03); }
-  .tab.is-active { background: rgba(79,209,197,.13); color: #b8f4ee; box-shadow: inset 0 0 0 1px rgba(79,209,197,.3); }
+  .tab:hover { color: var(--foreground); background: var(--muted); }
+  .tab[aria-selected="true"] {
+    background: var(--primary-soft); color: var(--primary-text);
+    box-shadow: inset 0 0 0 1px var(--primary-border);
+  }
   .tab-n {
     font-size: 11.5px; font-weight: 650; font-variant-numeric: tabular-nums;
-    padding: 1px 7px; border-radius: 99px; background: var(--surface-3); color: var(--text-dim);
+    padding: 1px 7px; border-radius: 99px; background: var(--muted); color: var(--secondary-foreground);
   }
-  .tab.is-active .tab-n { background: rgba(79,209,197,.16); color: #b8f4ee; }
+  .tab[aria-selected="true"] .tab-n { background: var(--primary-soft-strong); color: var(--primary-text); }
   .view[hidden] { display: none; }
 
   /* -------------------------------------------------------------- skills */
@@ -240,123 +328,255 @@
   .cat-chip {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 11px; border-radius: 99px; cursor: pointer;
-    border: 1px solid var(--border-2); background: var(--surface-3); color: var(--text-dim);
+    border: 1px solid var(--border-2); background: var(--muted); color: var(--secondary-foreground);
     font: inherit; font-size: 12.5px; font-weight: 550;
     transition: background .15s, color .15s, border-color .15s;
   }
-  .cat-chip:hover { color: var(--text); border-color: #3a4459; }
-  .cat-chip.is-active {
-    border-color: rgba(79,209,197,.45); background: rgba(79,209,197,.12); color: #b8f4ee;
+  .cat-chip:hover { color: var(--foreground); border-color: var(--input); }
+  .cat-chip[aria-pressed="true"] {
+    border-color: var(--primary-border); background: var(--primary-soft); color: var(--primary-text);
   }
-  .cat-chip .n { font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--muted); }
-  .cat-chip.is-active .n { color: #8fe6dd; }
+  .cat-chip .n { font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+  .cat-chip[aria-pressed="true"] .n { color: var(--primary-text); }
   .skills-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
   .skills-tools input[type="search"], .skills-tools select {
-    padding: 7px 11px; border-radius: 10px; border: 1px solid var(--border-2);
-    background: var(--surface-3); color: var(--text); font: inherit; font-size: 13px;
+    padding: 7px 11px; border-radius: var(--radius-sm); border: 1px solid var(--border-2);
+    background: var(--muted); color: var(--foreground); font: inherit; font-size: 13px;
+    transition: border-color .15s, box-shadow .15s;
   }
   .skills-tools input[type="search"] { flex: 1 1 230px; min-width: 0; }
-  .skills-tools input::placeholder { color: var(--muted); }
-  .skills-tools input[type="search"]:focus, .skills-tools select:focus { outline: none; border-color: rgba(79,209,197,.5); }
+  .skills-tools input::placeholder { color: var(--muted-foreground); }
+  .skills-tools input[type="search"]:focus, .skills-tools select:focus {
+    outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft);
+  }
   .skills-tools select { cursor: pointer; }
   .skills-tools-spacer { flex: 1; }
+  .kbd {
+    font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 5px;
+    border: 1px solid var(--border-2); background: var(--muted); color: var(--muted-foreground);
+  }
   .skills-list { max-height: 620px; overflow: auto; margin: 0 -6px; padding: 0 6px; }
   .skill-group { border-bottom: 1px solid var(--border-2); }
   .skill-group:last-child { border-bottom: 0; }
   .skill-group-head {
     display: flex; align-items: center; gap: 9px; padding: 9px 6px; cursor: pointer;
     border-radius: 8px; position: sticky; top: 0; z-index: 1;
-    background: linear-gradient(180deg, var(--surface-2) 82%, transparent);
+    background: var(--card-2);
   }
-  .skill-group-head:hover { background: var(--surface-3); }
+  .skill-group-head:hover { background: var(--muted); }
   .skill-group-name { font-size: 12.5px; font-weight: 700; letter-spacing: .02em; flex: none; }
-  .skill-group-desc { font-size: 12px; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .skill-group-count { font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--muted); flex: none; }
-  .skill-group-count.all { color: var(--ok); }
+  .skill-group-desc { font-size: 12px; color: var(--muted-foreground); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .skill-group-count { font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--muted-foreground); flex: none; }
+  .skill-group-count.all { color: var(--ok-text); }
   /* A collapsed group keeps its header, so the reader still sees the categories. */
   .skill-group.collapsed .skill-group-body { display: none; }
   .skill-group.collapsed .skill-caret { transform: rotate(-90deg); }
   .skill-row { border-bottom: 1px solid var(--border); }
   .skill-row:last-child { border-bottom: 0; }
   .skill-head { display: flex; align-items: center; gap: 12px; padding: 9px 6px 9px 24px; cursor: pointer; border-radius: 8px; }
-  .skill-head:hover { background: rgba(255,255,255,.025); }
-  .skill-row.open .skill-head { background: rgba(79,209,197,.07); }
+  .skill-head:hover { background: var(--muted); }
+  .skill-row.open .skill-head { background: var(--primary-soft); }
   .skill-name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; flex: none; }
-  .skill-intro { font-size: 12.5px; color: var(--text-dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .skill-intro.src { color: var(--muted); }
-  .skill-cov { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-dim); flex: none; }
-  .skill-cov.full { color: var(--ok); }
-  .skill-cov.partial { color: var(--warn); }
-  .skill-caret { color: var(--muted); flex: none; transition: transform .15s; }
+  .skill-intro { font-size: 12.5px; color: var(--secondary-foreground); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .skill-intro.src { color: var(--muted-foreground); }
+  .skill-cov { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--secondary-foreground); flex: none; }
+  .skill-cov.full { color: var(--ok-text); }
+  .skill-cov.partial { color: var(--warn-text); }
+  .skill-caret { color: var(--muted-foreground); flex: none; transition: transform .15s; }
   .skill-row.open .skill-caret { transform: rotate(90deg); }
+  /* The row's delete action. Hidden until the row (or the button itself) has
+     focus, so 127 rows do not show 127 trash cans — but never hidden on a
+     touch screen, where there is no hover to reveal it. */
+  .row-del {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; padding: 0; border-radius: 7px; cursor: pointer;
+    border: 1px solid transparent; background: transparent; color: var(--muted-foreground);
+    opacity: 0; transition: opacity .12s, color .12s, background .12s, border-color .12s;
+  }
+  .skill-head:hover .row-del, .row-del:focus-visible, .skill-row.open .row-del { opacity: 1; }
+  .row-del:hover { color: var(--destructive-text); background: var(--destructive-soft); border-color: var(--destructive-border); }
+  @media (hover: none) { .row-del { opacity: 1; } }
   .skill-detail { display: none; padding: 2px 6px 16px; }
   .skill-row.open .skill-detail { display: block; }
-  .skill-cat-line { font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
-  .skill-cat-line b { color: var(--text-dim); font-weight: 650; }
-  .skill-full { margin: 0 0 10px; font-size: 12.8px; color: var(--text-dim); line-height: 1.7; }
+  .skill-cat-line { font-size: 12.5px; color: var(--muted-foreground); margin: 0 0 10px; }
+  .skill-cat-line b { color: var(--secondary-foreground); font-weight: 650; }
+  .skill-full { margin: 0 0 10px; font-size: 12.8px; color: var(--secondary-foreground); line-height: 1.7; }
   /* The skill's own original description, shown under the Chinese intro. */
-  .skill-full.src { color: var(--muted); font-size: 12.2px; }
-  .skill-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
-  .skill-meta b { color: var(--text-dim); font-weight: 650; font-variant-numeric: tabular-nums; }
-  .skill-path { font-family: var(--mono); font-size: 11.5px; color: var(--muted); word-break: break-all; margin-bottom: 12px; }
+  .skill-full.src { color: var(--muted-foreground); font-size: 12.2px; }
+  .skill-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--muted-foreground); margin-bottom: 10px; }
+  .skill-meta b { color: var(--secondary-foreground); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .skill-path { font-family: var(--mono); font-size: 11.5px; color: var(--muted-foreground); word-break: break-all; margin-bottom: 12px; }
   .skill-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
-  .skill-cols h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 650; }
-  .chip.k-link { color: #7fd8cf; border-color: rgba(79,209,197,.35); background: rgba(79,209,197,.1); }
-  .chip.k-copy { color: #9ec1ff; border-color: rgba(96,165,250,.35); background: rgba(96,165,250,.1); }
+  .skill-cols h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); font-weight: 650; }
+  .chip.k-link { color: var(--primary-text); border-color: var(--primary-border); background: var(--primary-soft); }
+  .chip.k-copy { color: var(--info-text); border-color: var(--primary-border); background: var(--info-soft); }
   /* Dashed = what is on disk disagrees with what config.json asks for. */
-  .chip.k-drift { border-style: dashed; border-color: rgba(251,191,36,.5); color: var(--warn); }
-  .skills-empty { padding: 26px 10px; text-align: center; color: var(--muted); font-size: 13px; }
+  .chip.k-drift { border-style: dashed; border-color: var(--warn-border, var(--border-2)); color: var(--warn-text); }
+  .skills-empty { padding: 26px 10px; text-align: center; color: var(--muted-foreground); font-size: 13px; }
+
+  /* Skeletons. The skill list reads 100+ SKILL.md files and takes a second or
+     two; a spinner says "waiting", rows shaped like the result say "this many
+     lines are coming" — and the layout does not jump when they land. */
+  .sk-line { height: 10px; border-radius: 99px; background: var(--muted); margin: 0 0 10px; }
+  .sk-row { display: flex; align-items: center; gap: 12px; padding: 11px 6px 11px 24px; }
+  .sk-row .sk-line { margin: 0; }
+  .sk-w-1 { width: 22%; } .sk-w-2 { width: 46%; } .sk-w-3 { width: 12%; }
+  .shimmer { position: relative; overflow: hidden; }
+  .shimmer::after {
+    content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, var(--primary-soft), transparent);
+    animation: sweep 1.4s ease-in-out infinite;
+  }
+  @keyframes sweep { to { transform: translateX(100%); } }
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer::after { animation: none; }
+    * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
 
   /* -------------------------------------------------------------- panels */
   .panels { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; }
   @media (max-width: 900px) { .panels { grid-template-columns: 1fr; } }
   .panel { padding: 16px 18px; min-width: 0; }
-  .panel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .panel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
   .panel-head h3 { margin: 0; font-size: 14px; font-weight: 650; }
-  .panel-head .sub { color: var(--muted); font-size: 12px; }
+  .panel-head .sub { color: var(--muted-foreground); font-size: 12px; }
   pre.out {
-    margin: 0; padding: 12px 14px; border-radius: 10px; max-height: 330px; overflow: auto;
-    background: #0d1016; border: 1px solid var(--border);
-    font-family: var(--mono); font-size: 11.8px; line-height: 1.65; color: var(--text-dim);
+    margin: 0; padding: 12px 14px; border-radius: var(--radius-sm); max-height: 330px; overflow: auto;
+    background: var(--code-bg); border: 1px solid var(--border);
+    font-family: var(--mono); font-size: 11.8px; line-height: 1.65; color: var(--secondary-foreground);
     white-space: pre-wrap; word-break: break-word;
   }
-  pre.out .ln-err { color: #ffb3bd; }
-  pre.out .ln-ok  { color: #9ff0d8; }
-  pre.out .ln-warn{ color: #ffdf9e; }
+  pre.out .ln-err { color: var(--fail-text); }
+  pre.out .ln-ok  { color: var(--ok-text); }
+  pre.out .ln-warn{ color: var(--warn-text); }
   .panel-foot { margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .panel-foot .grow { flex: 1; }
 
-  .switch { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-dim); cursor: pointer; user-select: none; }
-  .switch input { accent-color: var(--accent-2); width: 15px; height: 15px; cursor: pointer; }
+  .switch { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--secondary-foreground); cursor: pointer; user-select: none; }
+  .switch input { accent-color: var(--primary); width: 15px; height: 15px; cursor: pointer; }
+
+  /* ------------------------------------------------------------- dialogs
+     One dialog component for both destructive and normal work, because the
+     behaviour that matters is identical (Radix pattern): the page behind is
+     inert, focus cannot leave the dialog, Esc closes it, and focus returns to
+     whatever opened it. The difference is only the wording and the primary
+     button's colour. */
+  .overlay {
+    position: fixed; inset: 0; z-index: 80;
+    background: rgba(6, 8, 12, 0.62);
+    backdrop-filter: blur(3px);
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 8vh 16px 16px; overflow: auto;
+    animation: fadein .16s ease;
+  }
+  html[data-theme="light"] .overlay { background: rgba(16, 24, 40, 0.34); }
+  .overlay[hidden] { display: none; }
+  @keyframes fadein { from { opacity: 0; } }
+  .dialog {
+    width: 100%; max-width: 560px;
+    background: var(--popover); color: var(--foreground);
+    border: 1px solid var(--border-2); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: 20px 22px 18px;
+    animation: dialogin .18s cubic-bezier(.2, .8, .3, 1);
+  }
+  @keyframes dialogin { from { opacity: 0; transform: translateY(-8px) scale(.98); } }
+  .dialog.wide { max-width: 680px; }
+  .dialog-head { display: flex; align-items: flex-start; gap: 12px; }
+  .dialog-head h2 { margin: 0; font-size: 17px; font-weight: 680; letter-spacing: .1px; }
+  .dialog-head .sub { color: var(--muted-foreground); font-size: 12.5px; margin-top: 3px; }
+  .dialog-close {
+    margin-left: auto; flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+    border: 1px solid transparent; background: transparent; color: var(--muted-foreground);
+  }
+  .dialog-close:hover { color: var(--foreground); background: var(--muted); border-color: var(--border); }
+  .dialog-body { margin: 16px 0 0; font-size: 13.5px; color: var(--secondary-foreground); }
+  .dialog-body p { margin: 0 0 10px; }
+  .dialog-body code, .dialog-body .mono {
+    font-family: var(--mono); font-size: 12.2px; color: var(--foreground);
+    background: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px;
+    word-break: break-all;
+  }
+  .dialog-foot { margin-top: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .dialog-foot .grow { flex: 1; }
+  /* Consequences, spelled out. An irreversible action lists what it changes
+     elsewhere before it asks for a click: the user cannot check the database or
+     the 21 targets from here, so the dialog has to say it. */
+  .consequences { margin: 0; padding: 0; list-style: none; }
+  .consequences li {
+    display: flex; gap: 9px; align-items: flex-start;
+    padding: 8px 0; border-top: 1px dashed var(--border); font-size: 12.8px;
+  }
+  .consequences li:first-child { border-top: 0; }
+  .consequences li svg { flex: none; margin-top: 2px; color: var(--muted-foreground); }
+  .consequences li b { color: var(--foreground); font-weight: 650; }
+  .dialog.danger .dialog-head h2 { color: var(--destructive-text); }
+  .btn.destructive {
+    background: var(--destructive); border-color: var(--destructive); color: var(--destructive-foreground);
+  }
+  .btn.destructive:hover { background: var(--destructive); color: var(--destructive-foreground); filter: brightness(1.08); }
+  .btn.destructive:disabled { opacity: .55; }
+
+  /* --------------------------------------------------------- add-skill UI */
+  .drop {
+    display: flex; align-items: center; gap: 14px;
+    padding: 22px 18px; border-radius: var(--radius); cursor: pointer;
+    border: 1.5px dashed var(--border-2); background: var(--card-2);
+    transition: border-color .15s, background .15s;
+    text-align: left; width: 100%; font: inherit; color: inherit;
+  }
+  .drop:hover { border-color: var(--primary-border); background: var(--primary-soft); }
+  .drop.over { border-color: var(--primary); background: var(--primary-soft); }
+  .drop-icon {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 42px; height: 42px; border-radius: 11px;
+    background: var(--primary-soft); color: var(--primary-text);
+    border: 1px solid var(--primary-border);
+  }
+  .drop-title { font-weight: 650; font-size: 13.5px; }
+  .drop-sub { color: var(--muted-foreground); font-size: 12.2px; margin-top: 2px; }
+  .picked { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border-2); background: var(--muted); }
+  .picked .mono { font-family: var(--mono); font-size: 12.2px; word-break: break-all; }
+  .picked .sz { color: var(--muted-foreground); font-size: 12px; white-space: nowrap; }
+  .result-list { margin: 14px 0 0; padding: 0; list-style: none; }
+  .result-list li { display: flex; gap: 8px; align-items: flex-start; padding: 4px 0; font-size: 12.6px; }
+  .result-list li svg { flex: none; margin-top: 3px; }
+  .result-list .ok   { color: var(--ok-text); }
+  .result-list .skip { color: var(--muted-foreground); }
+  .result-list .warn { color: var(--warn-text); }
+  .result-list .bad  { color: var(--fail-text); }
+  .result-list li span.txt { color: var(--secondary-foreground); }
 
   /* --------------------------------------------------------------- misc */
-  .progressbar { position: fixed; top: 0; left: 0; height: 2px; width: 0; z-index: 50;
-    background: linear-gradient(90deg, var(--accent), var(--info)); box-shadow: 0 0 10px rgba(79,209,197,.6);
+  .progressbar { position: fixed; top: 0; left: 0; height: 2px; width: 0; z-index: 90;
+    background: linear-gradient(90deg, var(--primary), var(--info)); box-shadow: 0 0 10px var(--primary-soft-strong);
     transition: width .25s ease, opacity .3s; opacity: 0; }
   .progressbar.on { opacity: 1; }
 
-  footer { max-width: 1360px; margin: 0 auto; padding: 0 22px 40px; color: var(--muted); font-size: 12px; }
+  footer { max-width: 1360px; margin: 0 auto; padding: 0 22px 40px; color: var(--muted-foreground); font-size: 12px; }
   footer p { margin: 4px 0; }
-  footer code { font-family: var(--mono); color: var(--text-dim); }
+  footer code { font-family: var(--mono); color: var(--secondary-foreground); }
 
-  .toasts { position: fixed; right: 18px; bottom: 18px; z-index: 60; display: flex; flex-direction: column; gap: 8px; max-width: min(420px, calc(100vw - 36px)); }
+  .toasts { position: fixed; right: 18px; bottom: 18px; z-index: 95; display: flex; flex-direction: column; gap: 8px; max-width: min(420px, calc(100vw - 36px)); }
   .toast {
     padding: 11px 14px; border-radius: 12px; border: 1px solid var(--border-2);
-    background: rgba(23,27,37,.96); box-shadow: var(--shadow); color: var(--text);
+    background: var(--popover); box-shadow: var(--shadow-md); color: var(--foreground);
     font-size: 13px; animation: toastin .22s ease; backdrop-filter: blur(8px);
   }
-  .toast.ok   { border-color: rgba(52,211,153,.45); }
-  .toast.warn { border-color: rgba(251,191,36,.45); }
-  .toast.fail { border-color: rgba(251,113,133,.45); }
+  .toast.ok   { border-color: var(--ok-border, var(--primary-border)); }
+  .toast.warn { border-color: var(--warn-border, var(--primary-border)); }
+  .toast.fail { border-color: var(--fail-border, var(--destructive-border)); }
   .toast .t { font-weight: 650; margin-bottom: 2px; display: flex; align-items: center; gap: 7px; }
-  .toast.ok .t   { color: var(--ok); }
-  .toast.warn .t { color: var(--warn); }
-  .toast.fail .t { color: var(--fail); }
-  .toast .d { color: var(--text-dim); font-size: 12.5px; white-space: pre-wrap; }
+  .toast.ok .t   { color: var(--ok-text); }
+  .toast.warn .t { color: var(--warn-text); }
+  .toast.fail .t { color: var(--fail-text); }
+  .toast .d { color: var(--secondary-foreground); font-size: 12.5px; white-space: pre-wrap; }
   @keyframes toastin { from { opacity: 0; transform: translateY(8px); } }
 
-  .skeleton { color: var(--muted); padding: 40px 0; text-align: center; }
-  .spinner { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--border-2); border-top-color: var(--accent); animation: rot .8s linear infinite; display: inline-block; vertical-align: -3px; }
+  .skeleton { color: var(--muted-foreground); padding: 40px 0; text-align: center; }
+  .spinner { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--border-2); border-top-color: var(--primary); animation: rot .8s linear infinite; display: inline-block; vertical-align: -3px; }
 </style>
 </head>
 <body>
@@ -399,6 +619,29 @@
     </symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v4.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.15" fill="currentColor"/></symbol>
     <symbol id="i-spin" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+    <!-- The carets on the skill groups and rows. These were referenced but never
+         defined, so every one of them rendered as an empty box. -->
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24">
+      <path d="M4 7h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M6.5 7l.8 12.1A1.9 1.9 0 0 0 9.2 21h5.6a1.9 1.9 0 0 0 1.9-1.9L17.5 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24">
+      <path d="M12 16V4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+      <path d="M7.5 8.5L12 4l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M14 3v4h4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 11v5.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="7.8" r="1.1" fill="currentColor"/></symbol>
   </defs>
 </svg>
 
@@ -406,7 +649,7 @@
 
 <header class="topbar">
   <div class="brand">
-    <svg width="30" height="30" viewBox="0 0 24 24" style="color: var(--accent)"><use href="#i-logo"/></svg>
+    <svg width="30" height="30" viewBox="0 0 24 24" style="color: var(--primary)"><use href="#i-logo"/></svg>
     <div>
       <div class="brand-title">SkillBridge</div>
       <div class="brand-sub">CC Switch 技能同步控制台</div>
@@ -414,6 +657,9 @@
   </div>
   <span class="pill" id="pill-run"><span class="dot"></span><span id="pill-run-text">读取中…</span></span>
   <div class="topbar-spacer"></div>
+  <button class="btn icon-only ghost" id="btn-theme" title="切换浅色 / 深色主题" aria-label="切换浅色或深色主题">
+    <svg class="icon" width="16" height="16" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+  </button>
   <button class="btn" id="btn-refresh" title="重新读取状态"><svg class="icon" width="15" height="15" viewBox="0 0 24 24"><use href="#i-refresh"/></svg><svg class="spin" width="15" height="15" viewBox="0 0 24 24"><use href="#i-spin"/></svg>刷新</button>
   <button class="btn primary" id="btn-sync" title="立即执行一次同步"><svg class="icon" width="15" height="15" viewBox="0 0 24 24"><use href="#i-sync"/></svg><svg class="spin" width="15" height="15" viewBox="0 0 24 24"><use href="#i-spin"/></svg>立即同步</button>
   <button class="btn danger" id="btn-stop" title="停止本服务并关闭（需按两次确认）"><svg width="15" height="15" viewBox="0 0 24 24"><use href="#i-power"/></svg><span id="btn-stop-label">停止</span></button>
@@ -422,20 +668,22 @@
 <main>
   <div id="banner"></div>
 
-  <!-- Two views behind one option bar: the sync state on the left, the skills
+  <!-- One option bar, two views: the sync state on the left, the skills
        themselves on the right. The skill list reads 100+ SKILL.md files, so it
        is only fetched when its view is actually shown (or refreshed by hand). -->
-  <nav class="tabs" id="tabs">
-    <button type="button" class="tab is-active" data-view="sync">
+  <nav class="tabs" id="tabs" role="tablist" aria-label="控制台视图">
+    <button type="button" class="tab" role="tab" id="tab-sync" data-view="sync"
+            aria-selected="true" aria-controls="view-sync" tabindex="0">
       <svg width="14" height="14" viewBox="0 0 24 24"><use href="#i-refresh"/></svg>同步状况
     </button>
-    <button type="button" class="tab" data-view="skills">
+    <button type="button" class="tab" role="tab" id="tab-skills" data-view="skills"
+            aria-selected="false" aria-controls="view-skills" tabindex="-1">
       <svg width="14" height="14" viewBox="0 0 24 24"><use href="#i-skill"/></svg>技能列表
       <span class="tab-n" id="tab-skill-count"></span>
     </button>
   </nav>
 
-  <div class="view" id="view-sync">
+  <div class="view" id="view-sync" role="tabpanel" aria-labelledby="tab-sync" tabindex="0">
 
   <section class="card hero" id="hero">
     <div class="hero-main">
@@ -455,7 +703,7 @@
   <section class="panels">
     <div class="card panel">
       <div class="panel-head">
-        <svg width="18" height="18" viewBox="0 0 24 24" style="color: var(--accent)"><use href="#i-db"/></svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" style="color: var(--primary)"><use href="#i-db"/></svg>
         <h3>数据库一致性</h3>
         <span class="sub" id="db-sub">CC Switch 的 skills 表 vs 技能文件夹</span>
       </div>
@@ -481,11 +729,11 @@
   </section>
   </div>
 
-  <div class="view" id="view-skills" hidden>
-    <div class="section-head"><h2>技能库</h2><span class="hint">按分类查看全部技能；点任意一行看它的简介、体积，以及它同步到了哪些工具</span></div>
+  <div class="view" id="view-skills" hidden role="tabpanel" aria-labelledby="tab-skills" tabindex="0">
+    <div class="section-head"><h2>技能库</h2><span class="hint">添加与删除都直接作用于 config.json 里的源目录（CC Switch 自己的 skills 目录）</span></div>
     <section class="card panel" id="skills-panel">
       <div class="panel-head">
-        <svg width="18" height="18" viewBox="0 0 24 24" style="color: var(--accent)"><use href="#i-skill"/></svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" style="color: var(--primary)"><use href="#i-skill"/></svg>
         <h3>全部技能</h3>
         <span class="sub" id="skills-sub">读取中…</span>
       </div>
@@ -494,6 +742,7 @@
       <div class="skill-cats" id="skill-cats"></div>
       <div class="skills-tools">
         <input type="search" id="skill-search" placeholder="按名称或中文简介搜索…" autocomplete="off" spellcheck="false">
+        <span class="kbd" aria-hidden="true">/</span>
         <select id="skill-sort" title="排序方式">
           <option value="name">按名称</option>
           <option value="coverage">按覆盖度</option>
@@ -503,6 +752,7 @@
         <label class="switch" title="只看还有目标没同步到的技能"><input type="checkbox" id="skill-only-gap"> 只看没全覆盖的</label>
         <div class="skills-tools-spacer"></div>
         <button class="btn" id="btn-skills" title="重新读取技能列表（读每个 SKILL.md，比刷新状态慢）"><svg class="icon" width="15" height="15" viewBox="0 0 24 24"><use href="#i-refresh"/></svg><svg class="spin" width="15" height="15" viewBox="0 0 24 24"><use href="#i-spin"/></svg>重新读取</button>
+        <button class="btn primary" id="btn-add-skill" title="从 .zip 压缩包安装技能到源目录"><svg width="15" height="15" viewBox="0 0 24 24"><use href="#i-plus"/></svg>添加技能</button>
       </div>
       <div id="skills-list" class="skills-list"><div class="skills-empty">读取中…</div></div>
       <div class="panel-foot"><span class="sub" id="skills-note"></span></div>
@@ -517,6 +767,71 @@
 
 <div class="toasts" id="toasts"></div>
 
+<!-- ------------------------------------------------------------- 删除技能 -->
+<div class="overlay" id="del-overlay" hidden>
+  <div class="dialog danger" role="dialog" aria-modal="true" aria-labelledby="del-title" aria-describedby="del-desc" id="del-dialog">
+    <div class="dialog-head">
+      <div>
+        <h2 id="del-title">删除技能</h2>
+        <div class="sub" id="del-sub"></div>
+      </div>
+      <button type="button" class="dialog-close" id="del-close" title="取消（Esc）" aria-label="取消删除">
+        <svg width="16" height="16" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <p id="del-desc"></p>
+      <ul class="consequences" id="del-effects"></ul>
+      <p class="sub" style="margin-top:12px">这一步只删源目录里的文件夹，<b>不会</b>自动同步；删完可以再点「立即同步」把各目标里的残留剪掉。</p>
+    </div>
+    <div class="dialog-foot">
+      <span class="sub" id="del-note" style="color:var(--muted-foreground)"></span>
+      <div class="grow"></div>
+      <!-- Cancel on the left, the destructive action on the right: the primary
+           button is always the one that continues, so the eye lands on the
+           dangerous option only after it has read what it does. -->
+      <button type="button" class="btn" id="del-cancel">取消</button>
+      <button type="button" class="btn destructive" id="del-confirm">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------------- 添加技能 -->
+<div class="overlay" id="add-overlay" hidden>
+  <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="add-title" aria-describedby="add-desc" id="add-dialog">
+    <div class="dialog-head">
+      <div>
+        <h2 id="add-title">添加技能</h2>
+        <div class="sub" id="add-sub"></div>
+      </div>
+      <button type="button" class="dialog-close" id="add-close" title="取消（Esc）" aria-label="取消添加">
+        <svg width="16" height="16" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <p id="add-desc">选择或拖入一个 <code>.zip</code> 压缩包。包里的每个技能（含 <code>SKILL.md</code> 的文件夹）会被安装到源目录；已经存在的同名技能会跳过，不会被覆盖。</p>
+      <div id="add-dropzone">
+        <button type="button" class="drop" id="add-drop">
+          <span class="drop-icon"><svg width="20" height="20" viewBox="0 0 24 24"><use href="#i-upload"/></svg></span>
+          <span>
+            <span class="drop-title">选择压缩包，或把它拖到这里</span>
+            <span class="drop-sub">只读取 .zip；单个压缩包最大 32 MB</span>
+          </span>
+        </button>
+        <input type="file" id="add-file" accept=".zip,application/zip,application/x-zip-compressed" hidden>
+      </div>
+      <div id="add-picked"></div>
+      <ul class="result-list" id="add-result"></ul>
+    </div>
+    <div class="dialog-foot">
+      <label class="switch" title="安装完成后立即跑一次同步，把新技能链接到各目标"><input type="checkbox" id="add-then-sync" checked> 添加后立即同步</label>
+      <div class="grow"></div>
+      <button type="button" class="btn" id="add-cancel">取消</button>
+      <button type="button" class="btn primary" id="add-confirm" disabled>上传并添加</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   'use strict';
@@ -528,6 +843,30 @@
   // 15s poll and every finished sync collapse whatever was being read.
   var openCards = {};
 
+  // ------------------------------------------------------------------ theme
+  // Two palettes, one choice remembered: the page is used next to a terminal
+  // all day, but a light theme is easier to read in a bright room, and the
+  // operator should not have to edit the file to get one.
+  function readTheme() {
+    try { return localStorage.getItem('sb-theme') || 'dark'; } catch (e) { return 'dark'; }
+  }
+  function writeTheme(v) {
+    try { localStorage.setItem('sb-theme', v); } catch (e) {}
+  }
+  function applyTheme(v) {
+    document.documentElement.setAttribute('data-theme', v);
+    var btn = $('btn-theme');
+    var light = (v === 'light');
+    btn.innerHTML = icon(light ? 'i-moon' : 'i-sun', 16);
+    btn.title = light ? '切换到深色主题' : '切换到浅色主题';
+  }
+  applyTheme(readTheme());
+  $('btn-theme').addEventListener('click', function () {
+    var next = readTheme() === 'light' ? 'dark' : 'light';
+    writeTheme(next);
+    applyTheme(next);
+  });
+
   // ------------------------------------------------------------- tab views
   // One option bar, two views: the sync state on the left, the skills on the
   // right. Which one is showing lives in the URL hash, so a reload or a
@@ -537,7 +876,12 @@
     if (name !== 'sync' && name !== 'skills') name = 'sync';
     view = name;
     Array.prototype.forEach.call(document.querySelectorAll('.tab[data-view]'), function (tab) {
-      tab.classList.toggle('is-active', tab.getAttribute('data-view') === name);
+      var on = (tab.getAttribute('data-view') === name);
+      tab.setAttribute('aria-selected', on ? 'true' : 'false');
+      // Roving tabindex: the panel is one tab stop, not one stop per view. An
+      // arrow key then has to land on the selected tab, and the browser does
+      // the right thing with tabindex 0 only there.
+      tab.tabIndex = on ? 0 : -1;
     });
     Array.prototype.forEach.call(document.querySelectorAll('.view'), function (el) {
       el.hidden = (el.id !== 'view-' + name);
@@ -560,7 +904,7 @@
   }
   function num(n) { return (n == null ? 0 : n).toLocaleString('zh-CN'); }
   function icon(id, size) {
-    return '<svg width="' + (size || 14) + '" height="' + (size || 14) + '" viewBox="0 0 24 24"><use href="#' + id + '"/></svg>';
+    return '<svg width="' + (size || 14) + '" height="' + (size || 14) + '" viewBox="0 0 24 24" aria-hidden="true"><use href="#' + id + '"/></svg>';
   }
 
   function progress(on) {
@@ -621,6 +965,75 @@
   function busy(btn, on) { if (btn) btn.classList.toggle('busy', !!on); if (btn) btn.disabled = !!on; }
 
   function banner(html) { $('banner').innerHTML = html || ''; }
+
+  /* ------------------------------------------------------------- dialogs
+     Both dialogs share this: while one is open the page behind it is inert,
+     Tab cannot leave it, Esc closes it, and focus goes back to whatever
+     opened it. Getting this wrong is why a modal you opened with the keyboard
+     strands you at the top of the document afterwards.
+
+     `inert` is the modern half (it removes the background from the tab order
+     and from assistive tech in one attribute); the keydown trap is the half
+     that still has to be written by hand for browsers without it. */
+  var dialogStack = [];
+  function openDialog(overlay, trigger) {
+    overlay.hidden = false;
+    var dlg = overlay.querySelector('.dialog');
+    // Only the elements this dialog made inert are released again. Anything
+    // that was already inert (nothing today, but a nested dialog would be)
+    // must stay inert when this one closes.
+    var entry = { overlay: overlay, trigger: trigger || null, dlg: dlg, added: [] };
+    Array.prototype.forEach.call(document.body.children, function (el) {
+      if (el === overlay) return;
+      if (!el.hasAttribute || el.hasAttribute('inert')) return;
+      el.setAttribute('inert', '');
+      entry.added.push(el);
+    });
+    dialogStack.push(entry);
+    // Focus the first interactive element, never the dialog box itself: a
+    // focused box means the next Tab starts a long walk through the page.
+    var first = dlg.querySelector('button:not([disabled]), [href], input:not([disabled]), select, textarea');
+    if (first) { first.focus(); } else { dlg.setAttribute('tabindex', '-1'); dlg.focus(); }
+  }
+  function closeDialog() {
+    var entry = dialogStack.pop();
+    if (!entry) return;
+    entry.overlay.hidden = true;
+    Array.prototype.forEach.call(entry.added, function (el) {
+      if (el.removeAttribute) { el.removeAttribute('inert'); }
+    });
+    if (entry.trigger && entry.trigger.focus) { entry.trigger.focus(); }
+  }
+  function topDialog() { return dialogStack.length ? dialogStack[dialogStack.length - 1] : null; }
+  document.addEventListener('keydown', function (e) {
+    var entry = topDialog();
+    if (!entry) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeDialog();
+      return;
+    }
+    // Tab cycles inside the dialog only.
+    if (e.key === 'Tab') {
+      var focusables = Array.prototype.filter.call(
+        entry.dlg.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+        function (el) { return el.offsetParent !== null || el === document.activeElement; });
+      if (!focusables.length) { e.preventDefault(); entry.dlg.focus(); return; }
+      var i = focusables.indexOf(document.activeElement);
+      if (i < 0) { i = 0; }
+      var next = e.shiftKey ? (i - 1 + focusables.length) % focusables.length : (i + 1) % focusables.length;
+      e.preventDefault();
+      focusables[next].focus();
+    }
+  });
+  // A click on the backdrop closes; a click inside the dialog does not. (A
+  // click that starts inside and ends on the backdrop must not count either.)
+  Array.prototype.forEach.call(document.querySelectorAll('.overlay'), function (overlay) {
+    overlay.addEventListener('mousedown', function (e) { overlay._downOnBackdrop = (e.target === overlay); });
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay && overlay._downOnBackdrop) closeDialog();
+    });
+  });
 
   /* ------------------------------------------------------------- render */
   function renderRunPill(s) {
@@ -695,7 +1108,7 @@
     var wrap = $('targets');
     var total = s.skill_count || 0;
     if (!s.targets || !s.targets.length) {
-      wrap.innerHTML = '<div class="card" style="padding:30px;text-align:center;color:var(--muted)">config.json 里还没有配置任何同步目标。</div>';
+      wrap.innerHTML = '<div class="card" style="padding:30px;text-align:center;color:var(--muted-foreground)">config.json 里还没有配置任何同步目标。</div>';
       return;
     }
     wrap.innerHTML = s.targets.map(function (t, i) {
@@ -764,12 +1177,27 @@
     return bytes + ' B';
   }
 
+  // Placeholder rows, shaped like the result. The list is built from 100+
+  // SKILL.md files, so this is what the reader looks at for a moment.
+  function renderSkillsSkeleton() {
+    var rows = '';
+    for (var i = 0; i < 8; i++) {
+      rows += '<div class="sk-row">' +
+        '<div class="sk-line shimmer sk-w-1"></div>' +
+        '<div class="sk-line shimmer sk-w-2"></div>' +
+        '<div class="sk-line shimmer sk-w-3"></div>' +
+        '</div>';
+    }
+    $('skills-list').innerHTML = rows;
+  }
+
   function loadSkills() {
     if (state.stopped) return Promise.resolve();
     if (skillState.inflight) return skillState.inflight;
     var btn = $('btn-skills');
     busy(btn, true);
     progress(true);
+    renderSkillsSkeleton();
     skillState.inflight = api('/api/skills').then(function (d) {
       renderSkills(d);
     }, function (e) {
@@ -817,14 +1245,14 @@
     (d.categories || []).forEach(function (c) { valid.push(c.id); });
     if (valid.indexOf(skillState.cat) < 0) skillState.cat = 'all';
 
-    var html = '<button type="button" class="cat-chip' + (skillState.cat === 'all' ? ' is-active' : '') +
-      '" data-cat="all">全部<span class="n">' + num(d.count) + '</span></button>';
+    var html = '<button type="button" class="cat-chip" data-cat="all" aria-pressed="' +
+      (skillState.cat === 'all') + '">全部<span class="n">' + num(d.count) + '</span></button>';
     html += (d.categories || []).map(function (c) {
       // The count on the chip, the coverage in the tooltip: "28 个已同步目标里
       // 有 27 个已包含" is a sentence, not something to squeeze next to it.
       var title = (c.desc || '') + (c.count ? '（' + c.covered + '/' + c.count + ' 个已同步到全部目标）' : '');
-      return '<button type="button" class="cat-chip' + (skillState.cat === c.id ? ' is-active' : '') +
-        '" data-cat="' + esc(c.id) + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' +
+      return '<button type="button" class="cat-chip" data-cat="' + esc(c.id) + '" aria-pressed="' +
+        (skillState.cat === c.id) + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' +
         esc(c.name) + '<span class="n">' + num(c.count) + '</span></button>';
     }).join('');
     wrap.innerHTML = html;
@@ -907,7 +1335,7 @@
     var collapsed = !!skillState.collapsed[cat.id];
     return '<div class="skill-group' + (collapsed ? ' collapsed' : '') + '" data-cat="' + esc(cat.id) + '">' +
       '<div class="skill-group-head" title="点击' + (collapsed ? '展开' : '折叠') + '这一组">' +
-        '<svg class="skill-caret" width="12" height="12" viewBox="0 0 24 24"><use href="#i-chevron"/></svg>' +
+        '<svg class="skill-caret" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron"/></svg>' +
         '<span class="skill-group-name">' + esc(cat.name) + '</span>' +
         '<span class="skill-group-desc">' + esc(cat.desc || '') + '</span>' +
         '<span class="skill-group-count' + (covered === rows.length ? ' all' : '') + '">' +
@@ -953,10 +1381,12 @@
 
     return '<div class="skill-row' + (skillState.open === s.name ? ' open' : '') + '" data-name="' + esc(s.name) + '">' +
       '<div class="skill-head">' +
-        '<svg class="skill-caret" width="12" height="12" viewBox="0 0 24 24"><use href="#i-chevron"/></svg>' +
+        '<svg class="skill-caret" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron"/></svg>' +
         '<span class="skill-name">' + esc(s.name) + '</span>' +
         '<span class="' + introCls + '">' + esc(introText) + '</span>' +
         '<span class="skill-cov ' + (gap ? 'partial' : 'full') + '" title="' + hasKeys.length + '/' + num(totalTargets) + ' 个同步目标已包含它">' + hasKeys.length + '/' + num(totalTargets) + '</span>' +
+        '<button type="button" class="row-del" data-del="' + esc(s.name) + '" title="从源目录删除这个技能" aria-label="删除技能 ' + esc(s.name) + '">' +
+          '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-trash"/></svg></button>' +
       '</div>' +
       '<div class="skill-detail">' +
         (s.intro ? '<p class="skill-full">' + esc(s.intro) + '</p>' : '') +
@@ -988,7 +1418,10 @@
     });
 
     Array.prototype.forEach.call(wrap.querySelectorAll('.skill-row'), function (el) {
-      el.addEventListener('click', function () {
+      el.addEventListener('click', function (e) {
+        // The row's delete button must not also expand the row: a click that
+        // removes something should not move the list under the cursor first.
+        if (e.target && e.target.closest && e.target.closest('[data-del]')) return;
         var open = !el.classList.contains('open');
         // One row open at a time: 127 expanded rows is a wall of text. The
         // choice lives outside the DOM for the same reason the target cards'
@@ -998,6 +1431,15 @@
         });
         el.classList.toggle('open', open);
         skillState.open = open ? el.getAttribute('data-name') : '';
+      });
+    });
+
+    Array.prototype.forEach.call(wrap.querySelectorAll('[data-del]'), function (btn) {
+      btn.addEventListener('click', function (e) {
+        // stopPropagation, not just the closest() check above: the row's own
+        // handler is on the row, so without this the click still bubbles.
+        e.stopPropagation();
+        askDeleteSkill(btn.getAttribute('data-del'), btn);
       });
     });
   }
@@ -1029,7 +1471,7 @@
     out.innerHTML = (data.output || '').split('\n').map(function (l) {
       return '<span class="' + classifyLogLine(l) + '">' + esc(l) + '</span>';
     }).join('\n');
-    $('db-note').textContent = data.ok ? '数据库与文件夹一致' : '发现漂移 — 请阅读上面内容后再决定是否手动修复';
+    $('db-note').textContent = data.ok ? '数据库与技能文件夹一致' : '发现漂移 — 请阅读上面内容后再决定是否手动修复';
   }
 
   /* ------------------------------------------------------------ actions */
@@ -1112,6 +1554,182 @@
       .then(function () { busy(btn, false); });
   }
 
+  /* ------------------------------------------------------- delete a skill
+     The source folder IS CC Switch's own skills directory, so this deletes a
+     skill every tool on the machine can see, with no undo. It therefore gets a
+     blocking dialog that names the path, the size, and the three consequences
+     the operator cannot see from this page — and the server refuses anything
+     that is not a skill even if this dialog is bypassed. */
+  var delTarget = null;
+  function findSkill(name) {
+    var d = skillState.data;
+    if (!d) return null;
+    var hit = null;
+    (d.skills || []).forEach(function (s) { if (s.name === name) hit = s; });
+    return hit;
+  }
+  function askDeleteSkill(name, trigger) {
+    var s = findSkill(name);
+    if (!s) { toast('fail', '列表里没有这个技能', name); return; }
+    delTarget = name;
+    var targets = ((state.snapshot && state.snapshot.targets) || []).length;
+    $('del-title').textContent = '删除技能「' + name + '」？';
+    $('del-sub').textContent = '将从源目录移除这个技能文件夹，此操作不可撤销。';
+    $('del-desc').innerHTML = '即将删除 <span class="mono">' + esc(s.path) + '</span><br>' +
+      '包含 <b>' + num(s.files) + '</b> 个文件、约 <b>' + esc(skillSizeText(s.size)) + '</b>。';
+    var effects = '';
+    effects += '<li>' + icon('i-info', 14) + '<span>CC Switch 数据库里的这一行会保留，之后被「检查数据库」报成漂移；<b>检查只报告，不删行</b>，要清理得手动执行 check-db-sync.py。</span></li>';
+    effects += '<li>' + icon('i-info', 14) + '<span>' + num(targets) + ' 个同步目标里已链接的副本会变成残留，<b>下一次同步</b>会把它们剪掉。</span></li>';
+    effects += '<li>' + icon('i-info', 14) + '<span>工具自己的同名目录不受影响，同步从不改动它们。</span></li>';
+    $('del-effects').innerHTML = effects;
+    var note = $('del-note');
+    note.textContent = (s.missing && s.missing.length)
+      ? '注意：它还有 ' + s.missing.length + ' 个目标没同步到，删掉后这些目标里也不会出现它。'
+      : '';
+    var confirmBtn = $('del-confirm');
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = '确认删除';
+    openDialog($('del-overlay'), trigger || null);
+  }
+  function runDeleteSkill() {
+    var name = delTarget;
+    if (!name) { closeDialog(); return; }
+    var confirmBtn = $('del-confirm');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '删除中…';
+    api('/api/skills/delete', { method: 'POST', body: { name: name } }).then(function (r) {
+      closeDialog();
+      if (r.ok) {
+        toast('ok', '已删除 ' + name, num(r.files) + ' 个文件、约 ' + skillSizeText(r.size));
+        // Both halves of the page are now out of date: the counts on the 同步状况
+        // tab and the list itself.
+        return refresh(true);
+      }
+      toast('fail', '删除被拒绝', r.error || '服务端没有返回原因');
+    }).catch(function (e) {
+      closeDialog();
+      toast('fail', '删除失败', e.message);
+    });
+  }
+
+  /* ---------------------------------------------------------- add a skill */
+  var addFile = null;   // { name, size, bytes }
+  var addDone = false;  // the picked package was installed; the primary button is now 关闭
+  // Back to the state the dialog opens in: no result, no picked file, and the
+  // primary button reset to 上传并添加. It deliberately does NOT touch $addFile —
+  // addTakeFile() sets the file first and calls this to clear a previous result
+  // before showing the new one — so the callers that mean "forget the file"
+  // clear it themselves.
+  function addResetResult() {
+    addDone = false;
+    $('add-result').innerHTML = '';
+    $('add-picked').innerHTML = '';
+    var confirm = $('add-confirm');
+    confirm.textContent = '上传并添加';
+    confirm.disabled = true;
+  }
+  function addForgetFile() {
+    addFile = null;
+    addResetResult();
+  }
+  function addShowPicked() {
+    var box = $('add-picked');
+    if (!addFile) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="picked">' +
+      icon('i-file', 16) +
+      '<span class="mono">' + esc(addFile.name) + '</span>' +
+      '<span class="sz">' + skillSizeText(addFile.size) + '</span>' +
+      '<div class="grow" style="flex:1"></div>' +
+      '<button type="button" class="btn ghost" id="add-remove">移除</button>' +
+      '</div>';
+    $('add-remove').addEventListener('click', addForgetFile);
+    $('add-confirm').disabled = false;
+  }
+
+  function addTakeFile(file) {
+    if (!file) return;
+    // 32 MB is the server's own ceiling (MaxUploadBytes leaves room for the
+    // base64 around it); catching it here saves a 44 MB upload that is going
+    // to be refused.
+    if (file.size > 32000000) {
+      toast('fail', '压缩包太大', '最大 32 MB，当前 ' + skillSizeText(file.size));
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function () {
+      var bytes = new Uint8Array(reader.result);
+      // base64 without pulling in a library: chunked, because a 30 MB string
+      // built by += is quadratic.
+      var s = '', chunk = 0x8000;
+      for (var i = 0; i < bytes.length; i += chunk) {
+        s += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      addFile = { name: file.name, size: file.size, bytes: bytes, b64: btoa(s) };
+      addResetResult();
+      addShowPicked();
+    };
+    reader.onerror = function () { toast('fail', '读取文件失败', file.name); };
+    reader.readAsArrayBuffer(file);
+  }
+  function addRenderResult(r) {
+    var box = $('add-result');
+    var html = '';
+    (r.added || []).forEach(function (n) {
+      html += '<li class="ok">' + icon('i-check', 14) + '<span class="txt">已添加 <b>' + esc(n) + '</b></span></li>';
+    });
+    (r.skipped || []).forEach(function (s) {
+      html += '<li class="skip">' + icon('i-info', 14) + '<span class="txt">跳过 <b>' + esc(s.name) + '</b>：' + esc(s.reason || '') + '</span></li>';
+    });
+    (r.warnings || []).forEach(function (w) {
+      html += '<li class="warn">' + icon('i-alert', 14) + '<span class="txt">' + esc(w) + '</span></li>';
+    });
+    (r.refused || []).forEach(function (x) {
+      html += '<li class="bad">' + icon('i-alert', 14) + '<span class="txt">拒绝 <span class="mono">' + esc(x.entry) + '</span>：' + esc(x.reason || '') + '</span></li>';
+    });
+    if (!html && r.error) {
+      html += '<li class="bad">' + icon('i-alert', 14) + '<span class="txt">' + esc(r.error) + '</span></li>';
+    }
+    box.innerHTML = html;
+  }
+  function runAddSkill() {
+    // Once the package is installed the primary button becomes 关闭: the result
+    // list below is the only place that reports a skipped duplicate or a refused
+    // entry, so the dialog stays open — but the button must not sit there greyed
+    // out with no explanation, and uploading the same file again is pointless.
+    if (addDone) {
+      closeDialog();
+      addForgetFile();
+      return;
+    }
+    if (!addFile) return;
+    var confirmBtn = $('add-confirm');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '上传中…';
+    api('/api/skills/add', { method: 'POST', body: { data: addFile.b64 } }).then(function (r) {
+      addRenderResult(r);
+      if (r.ok) {
+        var added = (r.added || []).length;
+        var skipped = (r.skipped || []).length;
+        toast('ok', added ? ('添加了 ' + added + ' 个技能') : '没有新技能',
+              skipped ? ('跳过了 ' + skipped + ' 个同名技能') : '');
+        addDone = true;
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = '关闭';
+        return refresh(true).then(function () {
+          if (addDone && $('add-then-sync').checked) return runSync();
+        });
+      }
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = '上传并添加';
+      toast('fail', '添加失败', r.error || '服务端没有返回原因');
+    }).catch(function (e) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = '上传并添加';
+      toast('fail', '上传失败', e.message);
+    });
+  }
+
+  /* --------------------------------------------------------------- wiring */
   $('btn-refresh').addEventListener('click', function () { refresh(true); });
   $('btn-sync').addEventListener('click', runSync);
   $('btn-db').addEventListener('click', runDbCheck);
@@ -1120,10 +1738,78 @@
   $('skill-sort').addEventListener('change', renderSkillRows);
   $('skill-only-gap').addEventListener('change', renderSkillRows);
 
+  // Delete dialog.
+  $('del-confirm').addEventListener('click', runDeleteSkill);
+  $('del-cancel').addEventListener('click', closeDialog);
+  $('del-close').addEventListener('click', closeDialog);
+
+  // Add dialog. It opens clean every time: whatever was picked or reported the
+  // last time is still in the DOM, and a stale result next to a new upload reads
+  // as if the new package produced it.
+  $('btn-add-skill').addEventListener('click', function () {
+    addForgetFile();
+    openDialog($('add-overlay'), this);
+  });
+  $('add-cancel').addEventListener('click', closeDialog);
+  $('add-close').addEventListener('click', closeDialog);
+  $('add-confirm').addEventListener('click', runAddSkill);
+  $('add-drop').addEventListener('click', function () { $('add-file').click(); });
+  $('add-file').addEventListener('change', function () { addTakeFile(this.files && this.files[0]); });
+  // Drag and drop. The counter is not decoration: a dragenter for a child
+  // element is followed by its own dragenter, and without it the highlight
+  // flickers off while the pointer is still inside the zone.
+  var dropDepth = 0;
+  var dropEl = $('add-drop');
+  ['dragenter', 'dragover'].forEach(function (type) {
+    dropEl.addEventListener(type, function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (type === 'dragenter') dropDepth++;
+      dropEl.classList.add('over');
+    });
+  });
+  dropEl.addEventListener('dragleave', function (e) {
+    e.preventDefault();
+    if (--dropDepth <= 0) { dropDepth = 0; dropEl.classList.remove('over'); }
+  });
+  dropEl.addEventListener('drop', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dropDepth = 0;
+    dropEl.classList.remove('over');
+    var dt = e.dataTransfer;
+    if (!dt || !dt.files || !dt.files.length) return;
+    addTakeFile(dt.files[0]);
+  });
+  // A file dropped anywhere on the dialog is still a drop on the dialog.
+  $('add-dialog').addEventListener('dragover', function (e) { e.preventDefault(); });
+  $('add-dialog').addEventListener('drop', function (e) {
+    e.preventDefault();
+    var dt = e.dataTransfer;
+    if (dt && dt.files && dt.files.length) addTakeFile(dt.files[0]);
+  });
+
+  // The option bar is an ARIA tablist: ←/→ move along it, Home/End jump to the
+  // ends, and Enter/Space (which a button already gives us) selects.
+  var tabsBar = $('tabs');
+  tabsBar.addEventListener('keydown', function (e) {
+    var tabs = Array.prototype.slice.call(tabsBar.querySelectorAll('.tab[data-view]'));
+    var i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    var next = -1;
+    if (e.key === 'ArrowRight') next = (i + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') next = (i - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = tabs.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    tabs[next].focus();
+    switchView(tabs[next].getAttribute('data-view'));
+  });
   Array.prototype.forEach.call(document.querySelectorAll('.tab[data-view]'), function (tab) {
     tab.addEventListener('click', function () { switchView(tab.getAttribute('data-view')); });
   });
-  // Back/forward and a pasted URL both change the hash, which is the view.
+  // Back, forward and a pasted URL both change the hash, which is the view.
   window.addEventListener('hashchange', function () {
     switchView((location.hash || '').replace(/^#/, ''), true);
   });
@@ -1181,11 +1867,20 @@
   });
 
   document.addEventListener('keydown', function (e) {
+    if (topDialog()) return;   // the dialog's own handler owns the keyboard
     // Modifier combos belong to the browser: Ctrl+S is "save this page", and it
     // used to also fire a sync here. A stray 's' is one keystroke away from
     // writing to all 20+ targets, so the shortcut is refresh-only now.
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    // '/' is where every search box in every tool lives; typing in the search
+    // box itself must type a slash, which the INPUT branch above already
+    // guarantees.
+    if (e.key === '/') {
+      var search = $('skill-search');
+      if (search) { e.preventDefault(); if (view !== 'skills') switchView('skills'); search.focus(); search.select(); }
+      return;
+    }
     if (e.key === 'r' || e.key === 'R') { e.preventDefault(); refresh(true); }
   });
 

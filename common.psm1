@@ -678,6 +678,312 @@ function Get-SkillBridgeSkills {
     return [pscustomobject]$result
 }
 
+# -------------------------------------------------------------- skill CRUD
+# Editing the source folder is a different class of operation from anything
+# else here: the source IS CC Switch's own skills directory, so adding or
+# deleting a skill changes what every tool on this machine sees. Both
+# functions therefore validate hard, say exactly what they did, and touch
+# nothing they were not asked to touch. Neither runs a sync: the caller (the
+# dashboard) asks for one separately, so the two effects stay visible.
+function Test-SkillName {
+    param([string]$Name)
+    # The folder name is the identity — the sync maps names, not paths — so a
+    # "name" that is really a path must not reach the filesystem.
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $false }
+    if ($Name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { return $false }
+    # CON/PRN/AUX/NUL/COM1../LPT1.. are directories Windows cannot delete again,
+    # and a trailing dot or space silently vanishes from paths.
+    if ($Name -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)') { return $false }
+    if ($Name.EndsWith('.') -or $Name.EndsWith(' ')) { return $false }
+    return $true
+}
+
+function Get-SkillBridgeSourceDir {
+    param([string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json'))
+    $config = Read-ConfigFile $ConfigPath
+    if ($null -eq $config) { return '' }
+    return ([string](Expand-EnvPath ([string]$config.source))).Trim()
+}
+
+function Remove-SkillDirectoryTree {
+    param([string]$Path)
+    # Never Remove-Item -Recurse on the tree itself: going through
+    # Remove-SkillEntry for each child is what keeps a reparse point inside a
+    # skill folder (a link someone left there) a link, instead of following it
+    # into CC Switch's source skill.
+    foreach ($item in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue)) {
+        Remove-SkillEntry -Path $item.FullName
+    }
+    [IO.Directory]::Delete($Path)
+}
+
+function Remove-SkillBridgeSkill {
+    param(
+        [string]$Name,
+        [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json')
+    )
+    # Deletes one source skill folder, after proving it is one of ours to
+    # delete. Deliberately not a sync: the 21 targets then hold orphans, which
+    # the next sync prunes, and the cc-switch.db row stays behind as drift the
+    # report-only check shows — both consequences are stated in the UI before
+    # the button is pressed.
+    $result = [ordered]@{
+        ok    = $false
+        name  = $Name
+        path  = ''
+        files = 0
+        size  = [long]0
+        error = ''
+    }
+    $src = Get-SkillBridgeSourceDir -ConfigPath $ConfigPath
+    if (-not $src -or -not (Test-Path -LiteralPath $src)) {
+        $result.error = "source dir not found: $src (check config.json)"
+        return [pscustomobject]$result
+    }
+    if (-not (Test-SkillName $Name)) {
+        $result.error = "illegal skill name: '$Name'"
+        return [pscustomobject]$result
+    }
+    $dir = Join-Path $src $Name
+    $result.path = $dir
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+        $result.error = "no such skill: $Name"
+        return [pscustomobject]$result
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $dir 'SKILL.md'))) {
+        # Same rule as the sync: a folder without SKILL.md is not a skill, so
+        # this is somebody else's directory and must not be removed.
+        $result.error = "refusing: '$Name' has no SKILL.md, so the sync does not treat it as a skill"
+        return [pscustomobject]$result
+    }
+    # Counted for the response (the UI echoes it back), not for a guard.
+    $files = @(Get-ChildItem -LiteralPath $dir -Recurse -File -Force -ErrorAction SilentlyContinue |
+        Where-Object { -not (Test-ReparsePoint $_) })
+    $result.files = $files.Count
+    foreach ($f in $files) { $result.size += [long]$f.Length }
+    try {
+        Remove-SkillDirectoryTree -Path $dir
+    } catch {
+        $result.error = "delete failed: $($_.Exception.Message)"
+        return [pscustomobject]$result
+    }
+    if (Test-Path -LiteralPath $dir) {
+        $result.error = "delete failed: $dir still exists"
+        return [pscustomobject]$result
+    }
+    $result.ok = $true
+    return [pscustomobject]$result
+}
+
+function Import-ZipSupport {
+    # Makes [IO.Compression.ZipFile] usable and says whether it worked.
+    # [Reflection.Assembly]::Load() only searches the GAC, and this assembly is
+    # not in the GAC on this machine (it sits in the framework directory), so it
+    # throws "cannot find the file" where Add-Type — which also knows the
+    # framework directory — succeeds. Loading it twice is harmless.
+    #
+    # The probe has to be a try/catch, not `[IO.Compression.ZipFile] -as [type]`:
+    # the type literal on the left has to resolve BEFORE `-as` ever runs, so the
+    # "is it there?" check throws exactly the error it is asking about.
+    try { if ($null -ne [IO.Compression.ZipFile]) { return $true } } catch { }
+    try { Add-Type -AssemblyName 'System.IO.Compression.FileSystem' -ErrorAction Stop } catch { return $false }
+    try { return ($null -ne [IO.Compression.ZipFile]) } catch { return $false }
+}
+
+function Install-SkillFromStaging {
+    # Moves one unpacked skill directory from the staging area into the source.
+    # $Result is the caller's ordered result dictionary, updated in place; only
+    # a real failure is an error, everything else is reported back to the user.
+    param(
+        [string]$Dir,
+        [string]$Src,
+        [System.Collections.Specialized.OrderedDictionary]$Result,
+        # Set when $Dir is the staging area itself, i.e. the package had its
+        # SKILL.md at the root instead of inside a folder.
+        [switch]$Root
+    )
+    $meta = Get-SkillFrontMatter (Join-Path $Dir 'SKILL.md')
+    $name = Split-Path -Leaf $Dir
+    if ($Root) {
+        # The staging directory name is not a name anyone chose, so the name
+        # has to come from the skill's own front matter.
+        if (-not $meta.name) {
+            $Result.refused += [pscustomobject]@{ entry = 'SKILL.md'; reason = 'a skill at the package root needs `name:` in its front matter' }
+            return
+        }
+        $name = $meta.name
+    }
+    if (-not (Test-SkillName $name)) {
+        $Result.refused += [pscustomobject]@{ entry = $name; reason = 'not a usable folder name' }
+        return
+    }
+    $dest = Join-Path $Src $name
+    if (Test-Path -LiteralPath $dest) {
+        # An existing skill is never overwritten: the user has to remove the
+        # old one first, which is a decision they can see.
+        $Result.skipped += [pscustomobject]@{ name = $name; reason = '同名技能已存在' }
+        return
+    }
+    if ($Root) {
+        New-Item -ItemType Directory -Path $dest -Force | Out-Null
+        foreach ($child in @(Get-ChildItem -LiteralPath $Dir -Force)) {
+            # A child folder that is itself a skill was already handled above
+            # (or refused on purpose); folding it into this one would hide it.
+            if ($child.PSIsContainer -and (Test-Path -LiteralPath (Join-Path $child.FullName 'SKILL.md'))) { continue }
+            if ($child.PSIsContainer) {
+                [IO.Directory]::Move($child.FullName, (Join-Path $dest $child.Name))
+            } else {
+                [IO.File]::Move($child.FullName, (Join-Path $dest $child.Name))
+            }
+        }
+    } else {
+        [IO.Directory]::Move($Dir, $dest)
+    }
+    if ($meta.name -and $meta.name -ne $name) {
+        $Result.warnings += ('SKILL.md 里的 name 是「' + $meta.name + '」，与文件夹名「' + $name + '」不一致；同步以文件夹名为准')
+    }
+    $Result.added += $name
+}
+
+function Import-SkillBridgeSkillZip {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json'),
+        [int]$MaxUploadBytes    = 33554432,   # 32 MB of packet
+        [int]$MaxExtractedBytes = 268435456,  # 256 MB unpacked (zip bomb ceiling)
+        [int]$MaxFiles          = 20000
+    )
+    # Installs the skill folders inside an uploaded .zip into the source.
+    #
+    # Extraction is done entry by entry rather than with ExtractToDirectory on
+    # purpose: .NET Framework's version does not sanitise the entry names, so a
+    # zip can name an entry "..\..\Windows\System32\x" and win. Every entry is
+    # checked for that (and for being a symlink, which .NET would happily
+    # materialise as a regular file with the mode bits set) before it is written.
+    $result = [ordered]@{
+        ok      = $false
+        added   = @()
+        skipped = @()
+        refused = @()
+        warnings = @()
+        error   = ''
+    }
+    if ($Bytes.Length -gt $MaxUploadBytes) {
+        $result.error = "the package is {0:N1} MB, over the {1:N0} MB limit" -f ($Bytes.Length / 1MB), ($MaxUploadBytes / 1MB)
+        return [pscustomobject]$result
+    }
+    if ($Bytes.Length -lt 4 -or $Bytes[0] -ne 0x50 -or $Bytes[1] -ne 0x4B) {
+        $result.error = 'not a zip file (a zip starts with the bytes PK)'
+        return [pscustomobject]$result
+    }
+    $src = Get-SkillBridgeSourceDir -ConfigPath $ConfigPath
+    if (-not $src -or -not (Test-Path -LiteralPath $src)) {
+        $result.error = "source dir not found: $src (check config.json)"
+        return [pscustomobject]$result
+    }
+
+    # Staging inside the source volume: the last step is a rename, which is
+    # instant and cannot half-copy a skill into place.
+    if (-not (Import-ZipSupport)) {
+        $result.error = 'System.IO.Compression.FileSystem is unavailable, so .zip packages cannot be read'
+        return [pscustomobject]$result
+    }
+    $stage = Join-Path $src ('.sb-import-' + [Guid]::NewGuid().ToString('N'))
+    $zip   = Join-Path $env:TEMP ('sb-import-' + [Guid]::NewGuid().ToString('N') + '.zip')
+    $archive = $null
+    try {
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        [IO.File]::WriteAllBytes($zip, $Bytes)
+        $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+        $stagePath = [IO.Path]::GetFullPath($stage)
+        $stageFull = $stagePath
+        if (-not $stageFull.EndsWith([IO.Path]::DirectorySeparatorChar)) {
+            $stageFull += [IO.Path]::DirectorySeparatorChar
+        }
+        $total = [long]0
+        $count = 0
+        foreach ($entry in $archive.Entries) {
+            # A directory entry is only a name ending in a separator.
+            if ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')) { continue }
+            # macOS archive noise, never a skill.
+            if ($entry.FullName -match '(^|/)__MACOSX/') { continue }
+            if ($entry.FullName -match '(^|/)\._') { continue }
+            if ($entry.FullName -match '(^|/)\.DS_Store$') { continue }
+            $rel = $entry.FullName.Replace('\', '/').TrimStart('/')
+            while ($rel.StartsWith('./')) { $rel = $rel.Substring(2) }
+            if ($rel -match '^[A-Za-z]:' -or $rel.StartsWith('/') -or $rel -match '(^|/)\.\.(/|$)') {
+                $result.refused += [pscustomobject]@{ entry = $entry.FullName; reason = 'the entry is not inside the package' }
+                continue
+            }
+            # A symlink entry would land as a regular file with the link mode
+            # bits set — a skill that is half a link. Refuse instead.
+            $mode = ([int]$entry.ExternalAttributes -shr 16) -band 0xF000
+            if ($mode -eq 0xA000) {
+                $result.refused += [pscustomobject]@{ entry = $entry.FullName; reason = 'the entry is a symbolic link' }
+                continue
+            }
+            $total += [long]$entry.Length
+            $count++
+            if ($total -gt $MaxExtractedBytes -or $count -gt $MaxFiles) {
+                $result.error = 'the package unpacks to far more than a skill should'
+                return [pscustomobject]$result
+            }
+            $dest = [IO.Path]::GetFullPath([IO.Path]::Combine($stage, $rel.Replace('/', [IO.Path]::DirectorySeparatorChar)))
+            if (-not $dest.StartsWith($stageFull, [StringComparison]::OrdinalIgnoreCase)) {
+                $result.refused += [pscustomobject]@{ entry = $entry.FullName; reason = 'the entry escapes the package directory' }
+                continue
+            }
+            $parent = Split-Path -Parent $dest
+            if (-not (Test-Path -LiteralPath $parent)) {
+                New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            }
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dest, $true)
+        }
+
+        # Skills are the folders that hold a SKILL.md — the same rule the sync
+        # uses — so `docs/` or `scripts/` in the zip are simply left behind.
+        # Nested skills are installed first and a root-level SKILL.md takes
+        # whatever is left, so a package root can never swallow a skill folder.
+        $stageRootMd = Join-Path $stage 'SKILL.md'
+        $skillDirs = @()
+        foreach ($md in @(Get-ChildItem -LiteralPath $stage -Recurse -Filter 'SKILL.md' -File -ErrorAction SilentlyContinue)) {
+            if ($md.DirectoryName -eq $stagePath) { continue }
+            $skillDirs += $md.Directory.FullName
+        }
+        if (-not $skillDirs.Count -and -not (Test-Path -LiteralPath $stageRootMd)) {
+            $result.error = 'the package contains no SKILL.md, so there is no skill in it'
+            return [pscustomobject]$result
+        }
+        foreach ($sd in $skillDirs) {
+            if (-not (Test-Path -LiteralPath $sd)) { continue }   # already taken with an earlier skill
+            Install-SkillFromStaging -Dir $sd -Src $src -Result $result
+        }
+        if (Test-Path -LiteralPath $stageRootMd) {
+            Install-SkillFromStaging -Dir $stagePath -Src $src -Result $result -Root
+        }
+        if (-not $result.added.Count -and $result.refused.Count) {
+            $result.error = ('安装被拒绝：' + $result.refused[0].reason)
+        } elseif (-not $result.added.Count) {
+            $result.error = '没有新技能被安装'
+        } else {
+            $result.ok = $true
+        }
+    } catch {
+        $result.error = "import failed: $($_.Exception.Message)"
+        return [pscustomobject]$result
+    } finally {
+        if ($null -ne $archive) { try { $archive.Dispose() } catch { }
+        }
+        if (Test-Path -LiteralPath $stage) {
+            try { Remove-SkillDirectoryTree -Path $stage } catch { }
+        }
+        if (Test-Path -LiteralPath $zip) {
+            try { Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue } catch { }
+        }
+    }
+    return [pscustomobject]$result
+}
+
 function Get-SkillBridgeStatus {
     param(
         [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json'),

@@ -22,6 +22,17 @@
 #   * GET /api/log?lines=N honours the tail size
 #   * POST /api/sync really runs sync-skills.ps1: the junction and the copy
 #     appear on disk, exit code 0, and the run record is refreshed
+#   * POST /api/skills/add installs the skills inside an uploaded .zip into the
+#     configured source: a valid package lands (SKILL.md and its nested folders),
+#     a package whose name is already taken is reported as skipped and changes
+#     nothing, an entry that tries to escape the package (`..\..\x`) is refused
+#     without abandoning the rest of the upload and without leaving staging,
+#     non-zip bytes are refused, and a 49 MB body is answered with 413 while the
+#     server keeps serving afterwards
+#   * POST /api/skills/delete removes one skill folder from the source, refuses
+#     an illegal name, a folder that is not there, and a folder without SKILL.md
+#     — and leaves the targets holding the link, which shows up as a residual the
+#     next sync prunes
 #   * POST /api/db-check is report-only: cc-switch.db is byte-identical after it,
 #     even when the check finds drift
 #   * the listener is bound to loopback only, never 0.0.0.0
@@ -153,6 +164,30 @@ function Get-JsonResult {
 $ui = Join-Path $root 'web-ui.ps1'
 if (-not (Test-Path -LiteralPath $ui)) { throw "FAIL: web-ui.ps1 not found: $ui" }
 
+# A zip the server can import, written with the same assembly it uses. On this
+# machine Add-Type is the only way to reach it ([Reflection.Assembly]::Load
+# looks in the GAC, and the assembly is not in it), and the client side of the
+# test needs the type as much as the server does.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+function New-TestZip {
+    param([string]$Path, [scriptblock]$Fill)
+    if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
+    $archive = [IO.Compression.ZipFile]::Open($Path, 'Create')
+    try { & $Fill $archive } finally { $archive.Dispose() }
+}
+function Write-ZipText {
+    param($Archive, [string]$EntryName, [string]$Text)
+    $entry = $Archive.CreateEntry($EntryName)
+    $writer = New-Object IO.StreamWriter($entry.Open(), (New-Object Text.UTF8Encoding($false)))
+    $writer.Write($Text)
+    $writer.Close()
+}
+function Ask-Import {
+    param([byte[]]$Bytes, [string]$What = 'POST /api/skills/add')
+    $body = '{"data":"' + [Convert]::ToBase64String($Bytes) + '"}'
+    return (Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/skills/add' -Token $Token -Body $body) $What)
+}
+
 # Ask the OS for a free port, then release it: the server gets a port nothing
 # else is on, so a collision cannot make the suite fail for the wrong reason.
 $probe = New-Object System.Net.Sockets.TcpListener ([System.Net.IPAddress]::Loopback), 0
@@ -250,7 +285,50 @@ try {
         throw 'FAIL: the skill view lost the styles for the category chips and the per-category group headers'
     }
     if ($page.text -notmatch 's\.intro' -or $page.text -notmatch 'skillState\.cat') {
-        throw 'FAIL: the skill list no longer renders the Chinese intro (`s.intro`) or filters by category'
+        throw "FAIL: the skill list no longer renders the Chinese intro (`s.intro`) or filters by category"
+    }
+    # The carets on the skill groups and rows are referenced by the row builder;
+    # the symbol itself used to be missing, so every one of them rendered as an
+    # empty box and the list looked like it had no fold/unfold affordance.
+    if ($page.text -notmatch '<symbol id="i-chevron"') {
+        throw 'FAIL: #i-chevron is used by the skill rows but never defined, so the carets are invisible'
+    }
+    # The option bar is a real ARIA tablist, not two buttons that happen to sit
+    # together: a screen reader has to be told which view is selected.
+    if ($page.text -notmatch 'role="tablist"' -or $page.text -notmatch 'role="tab"' -or $page.text -notmatch 'aria-controls="view-skills"') {
+        throw 'FAIL: the option bar is not an ARIA tablist (no role=tablist/role=tab/aria-controls)'
+    }
+    if ($page.text -notmatch 'aria-selected="true"') {
+        throw 'FAIL: no tab is marked aria-selected, so the selected view is not exposed to assistive tech'
+    }
+    # One token set, two themes: everything else in the stylesheet asks for a
+    # semantic name, which is the only way the light theme is a different
+    # palette instead of a second page.
+    if ($page.text -notmatch 'html\[data-theme="light"\]') {
+        throw 'FAIL: the page has no light theme block, so the theme button has nothing to switch to'
+    }
+    if ($page.text -notmatch '--destructive\s*:' -or $page.text -notmatch '--muted-foreground\s*:') {
+        throw 'FAIL: the semantic token set (--destructive / --muted-foreground) is gone from the stylesheet'
+    }
+    # Deleting a skill is irreversible and touches CC Switch's own skills
+    # directory, so it is a blocking modal that names the consequences - never a
+    # one-click confirm().
+    if ($page.text -notmatch 'id="del-overlay"' -or $page.text -notmatch 'id="del-confirm"') {
+        throw 'FAIL: the delete confirmation dialog is missing from the page'
+    }
+    if ($page.text -notmatch 'aria-modal="true"' -or $page.text -notmatch 'aria-labelledby="del-title"') {
+        throw 'FAIL: the delete dialog is not an ARIA modal dialog (aria-modal / aria-labelledby)'
+    }
+    # And adding one, from a .zip.
+    if ($page.text -notmatch 'id="add-overlay"' -or $page.text -notmatch 'id="add-drop"' -or $page.text -notmatch 'id="add-file"') {
+        throw 'FAIL: the add-skill dialog (drop zone + file input) is missing from the page'
+    }
+    if ($page.text -notmatch 'data-del=' -or $page.text -notmatch 'row-del') {
+        throw 'FAIL: the skill rows have no delete action any more'
+    }
+    # Keyboard users get a visible ring; the rest of the page relies on it.
+    if ($page.text -notmatch ':focus-visible') {
+        throw 'FAIL: the page has no :focus-visible ring, so it is unusable without a mouse'
     }
 
     # -- no token, no API -----------------------------------------------------
@@ -443,6 +521,205 @@ try {
         throw "FAIL: the catch-all bucket reports count=$($bucket2.count) covered=$($bucket2.covered) after the sync, expected 1/1"
     }
 
+    # -- adding and deleting skills, against the configured source ------------
+    # Both routes write to the fixture source ($tmp\src, standing in for
+    # config.json's `source`). A round trip has to work here or it does not work
+    # at all: the same two functions run against CC Switch's own skills folder.
+    $srcDir = Join-Path $tmp 'src'
+
+    $zipGood = Join-Path $tmp 'good.zip'
+    New-TestZip $zipGood {
+        param($a)
+        Write-ZipText $a 'inbox-skill/SKILL.md' "---`nname: inbox-skill`ndescription: >-`n  安装包导入的技能。`n---`n# inbox`n"
+        Write-ZipText $a 'inbox-skill/notes/ref.md' 'reference body'
+    }
+    $goodBytes = [IO.File]::ReadAllBytes($zipGood)
+    $add = Ask-Import -Bytes $goodBytes
+    if ($add.ok -ne $true) { throw "FAIL: importing a valid zip was refused: $($add.error)" }
+    if (@($add.added) -notcontains 'inbox-skill') {
+        throw "FAIL: the import added $(@($add.added) -join ', ') — 'inbox-skill' is not among them"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $srcDir 'inbox-skill\SKILL.md'))) {
+        throw 'FAIL: the imported skill has no SKILL.md in the source'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $srcDir 'inbox-skill\notes\ref.md'))) {
+        throw 'FAIL: the import dropped the nested folder of the package'
+    }
+
+    # The same package a second time: an existing skill is never overwritten,
+    # because overwriting is how a person loses a skill they were editing.
+    $add2 = Ask-Import -Bytes $goodBytes -What 'POST /api/skills/add (again)'
+    if ($add2.ok -ne $false) { throw 'FAIL: re-importing an existing skill reported ok' }
+    $skippedNames = @(@($add2.skipped) | ForEach-Object { $_.name })
+    if ($skippedNames -notcontains 'inbox-skill') {
+        throw "FAIL: the duplicate import reported skipped=$(($skippedNames) -join ', ')"
+    }
+    if ((Get-Content -LiteralPath (Join-Path $srcDir 'inbox-skill\notes\ref.md') -Raw) -ne 'reference body') {
+        throw 'FAIL: the duplicate import overwrote the file already in the source'
+    }
+
+    # Zip-slip. .NET Framework's ExtractToDirectory would happily write
+    # ..\..\out.txt, so the guard is the whole defence and it has to be tested
+    # with an entry that actually tries to escape.
+    $marker = 'sb-smoke-escaped.txt'
+    $escapedPath = Join-Path $env:TEMP $marker
+    if (Test-Path -LiteralPath $escapedPath) { Remove-Item -LiteralPath $escapedPath -Force }
+    $zipSlip = Join-Path $tmp 'slip.zip'
+    New-TestZip $zipSlip {
+        param($a)
+        Write-ZipText $a 'slip-skill/SKILL.md' "---`nname: slip-skill`ndescription: >-`n  带穿越项的安装包。`n---`n# slip`n"
+        Write-ZipText $a ('..\..\' + $marker) 'escaped'
+    }
+    $add3 = Ask-Import -Bytes ([IO.File]::ReadAllBytes($zipSlip)) -What 'POST /api/skills/add (zip-slip)'
+    $escapedRefused = [bool](@($add3.refused) | Where-Object { [string]$_.entry -like "*$marker*" })
+    if (-not $escapedRefused) {
+        throw "FAIL: the escaping entry was not refused (the zip-slip guard is gone): $(@($add3.refused) | ConvertTo-Json -Compress)"
+    }
+    if (Test-Path -LiteralPath $escapedPath) {
+        throw "FAIL: the zip-slip entry escaped into $env:TEMP"
+    }
+    # The harmless half of the same package still installs: refusing one entry
+    # must not abandon the rest of the upload.
+    if (@($add3.added) -notcontains 'slip-skill') {
+        throw "FAIL: refusing the escaping entry also refused the rest of the package"
+    }
+    # Nothing may be left in the source: a staging directory that survives the
+    # import would show up as a phantom skill the next time the list is read.
+    $staging = @(Get-ChildItem -LiteralPath $srcDir -Directory -Force | Where-Object { $_.Name -like '.sb-import-*' })
+    if ($staging.Count -ne 0) {
+        throw "FAIL: the import left its staging directory behind: $($staging[0].FullName)"
+    }
+
+    # Not a zip at all.
+    $add4 = Ask-Import -Bytes ([Text.Encoding]::UTF8.GetBytes('this is not a zip')) -What 'POST /api/skills/add (not a zip)'
+    if ($add4.ok -ne $false -or $add4.error -notmatch 'PK|zip') {
+        throw "FAIL: non-zip bytes were not refused: ok=$($add4.ok) error=$($add4.error)"
+    }
+
+    # -- the routes' guards ----------------------------------------------------
+    $addGet = Invoke-Api -Method 'GET' -Path 'api/skills/add' -Token $Token
+    if ($addGet.code -ne 405) {
+        throw "FAIL: GET /api/skills/add returned HTTP $($addGet.code) (expected 405)"
+    }
+    $delGet = Invoke-Api -Method 'GET' -Path 'api/skills/delete' -Token $Token
+    if ($delGet.code -ne 405) {
+        throw "FAIL: GET /api/skills/delete returned HTTP $($delGet.code) (expected 405)"
+    }
+    foreach ($call in @(
+        @{ m = 'POST'; p = 'api/skills/add';    b = '{}' },
+        @{ m = 'POST'; p = 'api/skills/delete'; b = '{"name":"demo-skill"}' }
+    )) {
+        $r = Invoke-Api -Method $call.m -Path $call.p -Body $call.b
+        if ($r.code -ne 403) {
+            throw "FAIL: $($call.m) /$($call.p) without X-SB-Token returned HTTP $($r.code) (expected 403)"
+        }
+    }
+    $noName = Invoke-Api -Method 'POST' -Path 'api/skills/delete' -Token $Token -Body '{}'
+    if ($noName.code -ne 400) {
+        throw "FAIL: a delete with no name returned HTTP $($noName.code) (expected 400)"
+    }
+    $badZip = Invoke-Api -Method 'POST' -Path 'api/skills/add' -Token $Token -Body '{"nope":1}'
+    if ($badZip.code -ne 400) {
+        throw "FAIL: an add with no base64 package returned HTTP $($badZip.code) (expected 400)"
+    }
+    # The body is capped, and the cap is answered with 413 rather than by
+    # buffering gigabytes into the server's memory. The cap is 48 MiB, so this is
+    # ~49.6 MiB of 'A' - deliberately not valid JSON, because the size gate runs
+    # before anything parses it.
+    $toobig = Invoke-Api -Method 'POST' -Path 'api/skills/add' -Token $Token -Body ([string]::new('A', 52000000))
+    if ($toobig.code -ne 413) {
+        throw "FAIL: a 49 MB body was answered with HTTP $($toobig.code) (expected 413): $($toobig.text)"
+    }
+    if ($toobig.text -notmatch 'limit') { throw "FAIL: the 413 body does not explain the limit: $($toobig.text)" }
+    # And the server is still healthy: the refused body is drained, or the
+    # connection is reset and the next request fails for no visible reason.
+    if ((Invoke-Api -Method 'GET' -Path 'api/status' -Token $Token).code -ne 200) {
+        throw 'FAIL: the server stopped answering after refusing an oversized body'
+    }
+
+    # -- deleting is refused until it is provably a skill ----------------------
+    $badName = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/skills/delete' -Token $Token -Body '{"name":".."}') 'POST /api/skills/delete (..)'
+    if ($badName.ok -ne $false -or $badName.error -notmatch 'illegal') {
+        throw "FAIL: the name '..' was not refused as illegal: ok=$($badName.ok) error=$($badName.error)"
+    }
+    $gone = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/skills/delete' -Token $Token -Body '{"name":"no-such-skill"}') 'POST /api/skills/delete (missing)'
+    if ($gone.ok -ne $false -or $gone.error -notmatch 'no such skill') {
+        throw "FAIL: deleting a skill that is not there was not refused: ok=$($gone.ok) error=$($gone.error)"
+    }
+    # The source also holds a directory that is not a skill (the tool's own
+    # stuff). Deleting must refuse it, not treat every folder as removable.
+    New-Item -ItemType Directory -Path (Join-Path $srcDir 'notaskill') -Force | Out-Null
+    $notSkill = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/skills/delete' -Token $Token -Body '{"name":"notaskill"}') 'POST /api/skills/delete (no SKILL.md)'
+    if ($notSkill.ok -ne $false -or $notSkill.error -notmatch 'SKILL.md') {
+        throw "FAIL: a folder without SKILL.md was not refused: ok=$($notSkill.ok) error=$($notSkill.error)"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $srcDir 'notaskill'))) {
+        throw 'FAIL: the refusal still deleted the folder'
+    }
+
+    # -- the real delete, and what it leaves behind ----------------------------
+    $del = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/skills/delete' -Token $Token -Body '{"name":"demo-skill"}') 'POST /api/skills/delete'
+    if ($del.ok -ne $true) { throw "FAIL: deleting demo-skill was refused: $($del.error)" }
+    if ($del.name -ne 'demo-skill' -or $del.files -lt 1 -or $del.size -le 0) {
+        throw "FAIL: the delete result does not report what it removed: $($del | ConvertTo-Json -Compress)"
+    }
+    if (Test-Path -LiteralPath (Join-Path $srcDir 'demo-skill')) {
+        throw 'FAIL: the source still holds the deleted skill'
+    }
+    # The 21 targets are not part of the delete, so the link and the copy are
+    # still on disk — as orphans, which is what the next sync prunes.
+    $st3 = Get-JsonResult (Invoke-Api -Method 'GET' -Path 'api/status' -Token $Token) 'GET /api/status after delete'
+    if ($st3.skill_count -ne 2) {
+        throw "FAIL: after deleting one of three skills the snapshot reports skill_count=$($st3.skill_count)"
+    }
+    if ($st3.needs_sync -ne $true) {
+        throw 'FAIL: deleting a skill leaves links behind, so the snapshot must report needs_sync'
+    }
+    $linkT3 = @(@($st3.targets) | Where-Object { $_.mode -ne 'copy' })[0]
+    if (@($linkT3.orphans).Count -lt 1) {
+        throw 'FAIL: the junction left by the deleted skill is not reported as a residual (orphan)'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $tmp 'tgt\demo-skill'))) {
+        throw 'FAIL: the link target no longer holds the junction the residual claim is about'
+    }
+    $sy2 = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/sync' -Token $Token -Body '{}') 'POST /api/sync after delete'
+    if ($sy2.ok -ne $true) { throw "FAIL: the sync after the delete failed: $($sy2.output)" }
+    if ($sy2.output -notmatch 'skills=2') {
+        throw "FAIL: the sync after the delete does not mention skills=2: $($sy2.output)"
+    }
+    if (Test-Path -LiteralPath (Join-Path $tmp 'tgt\demo-skill')) {
+        throw 'FAIL: the sync did not prune the junction left by the deleted skill'
+    }
+    if (Test-Path -LiteralPath (Join-Path $tmp 'tgt-copy\demo-skill')) {
+        throw 'FAIL: the sync did not remove the copy of the deleted skill (it carries our marker, so it is ours)'
+    }
+    # The two added skills made it into every target, which proves the import
+    # installed something a sync can actually link.
+    $st4 = Get-JsonResult (Invoke-Api -Method 'GET' -Path 'api/status' -Token $Token) 'GET /api/status after the second sync'
+    if ($st4.needs_sync -ne $false) {
+        throw "FAIL: after a clean sync the snapshot still reports needs_sync: $($st4.error)"
+    }
+    foreach ($t in @($st4.targets)) {
+        if (@($t.missing).Count -ne 0) {
+            throw "FAIL: target $($t.name) still misses $($t.missing -join ', ')"
+        }
+    }
+
+    # -- and the browser payload shows the new state --------------------------
+    $sk3 = Get-JsonResult (Invoke-Api -Method 'GET' -Path 'api/skills' -Token $Token) 'GET /api/skills after CRUD'
+    $names3 = @($sk3.skills | ForEach-Object { $_.name })
+    if ($names3 -contains 'demo-skill') { throw 'FAIL: the deleted skill is still in the browser payload' }
+    foreach ($n in 'inbox-skill', 'slip-skill') {
+        if ($names3 -notcontains $n) { throw "FAIL: the added skill '$n' is missing from the browser payload" }
+    }
+    $boxed = @($sk3.skills | Where-Object { $_.name -eq 'inbox-skill' })[0]
+    if ($boxed.description -notmatch '安装包导入的技能') {
+        throw "FAIL: the imported skill's description was lost: '$($boxed.description)'"
+    }
+    if (@($boxed.has.PSObject.Properties).Count -ne 2) {
+        throw "FAIL: the imported skill is not in both targets: $($boxed.has | ConvertTo-Json -Compress)"
+    }
+
     # -- db-check must report, never repair ----------------------------------
     # The byte hash is the assertion: the user's rule is that nothing automated
     # may delete rows from cc-switch.db, and a changed file means something did.
@@ -548,7 +825,16 @@ try {
     if ($srvOut -notmatch 'sync requested') {
         throw "FAIL: the server did not log the driven sync: $srvOut"
     }
-    Write-Host 'OK: web-ui smoke (page+token, 403 gate, 405/404, snapshot, skill browser, log tail, driven sync, report-only db-check, loopback bind, clean stop)'
+    if ($srvOut -notmatch 'delete requested: demo-skill' -or $srvOut -notmatch 'deleted demo-skill') {
+        throw "FAIL: the server did not log the driven delete: $srvOut"
+    }
+    if ($srvOut -notmatch 'import requested' -or $srvOut -notmatch 'imported: inbox-skill') {
+        throw "FAIL: the server did not log the driven import: $srvOut"
+    }
+    if ($srvOut -notmatch 'delete refused \(\.\.\)') {
+        throw "FAIL: the server did not log the refused delete attempt: $srvOut"
+    }
+    Write-Host 'OK: web-ui smoke (page+token, 403 gate, 405/404, add/delete round trip, zip-slip, snapshot, skill browser, log tail, driven sync, report-only db-check, loopback bind, clean stop)'
 } finally {
     if ($proc -and -not $proc.HasExited) {
         try { $proc.Kill() } catch { }
