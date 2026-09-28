@@ -1097,6 +1097,10 @@ function Get-SkillBridgeStatus {
                 linked        = 0
                 copied        = 0
                 stale         = 0
+                # WHICH copies went stale. `stale` alone leaves the card showing
+                # "过期 N" with nothing behind the number; the name is what the
+                # detail chips need to list, and it is known right here.
+                stale_list    = @()
                 missing       = @()
                 orphans       = @()
                 dead          = @()
@@ -1154,6 +1158,7 @@ function Get-SkillBridgeStatus {
                             } elseif (-not $SkipFingerprints) {
                                 if ($sourceFingerprints[$item.Name] -ne (Get-SkillFingerprint $item.FullName)) {
                                     $row.stale++
+                                    $row.stale_list += $item.Name
                                     $row.issues += "$($item.Name): copy differs from the source (next sync refreshes it)"
                                 }
                             }

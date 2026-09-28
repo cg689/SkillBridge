@@ -857,6 +857,27 @@ try {
         }
     }
 
+    # -- the copy-mode target must name WHICH copies went stale -----------------
+    # The 过期 badge used to be a count with nothing behind it: the name lived
+    # only in an issue string. Drift a copy on disk and the snapshot has to hand
+    # the page a list the detail chips can show.
+    $drift = Join-Path $tmp 'tgt-copy\inbox-skill\drift-marker.txt'
+    [System.IO.File]::WriteAllText($drift, 'stale on purpose')
+    $st5 = Get-JsonResult (Invoke-Api -Method 'GET' -Path 'api/status' -Token $Token) 'GET /api/status after copy drift'
+    $copyT5 = @(@($st5.targets) | Where-Object { $_.mode -eq 'copy' })[0]
+    if ($copyT5.stale -ne 1) {
+        throw "FAIL: a drifted copy did not raise stale (got $($copyT5.stale))"
+    }
+    if (@($copyT5.stale_list) -notcontains 'inbox-skill') {
+        throw "FAIL: the snapshot did not name the stale copy (stale_list: $($copyT5.stale_list -join ', '))"
+    }
+    # the link target must NOT be dragged in: a junction follows the source by
+    # definition, so "stale" there would be a false alarm on every card.
+    $linkT5 = @(@($st5.targets) | Where-Object { $_.mode -ne 'copy' })[0]
+    if ($linkT5.stale -ne 0) {
+        throw "FAIL: a link-mode target reported stale=$($linkT5.stale) (junctions cannot go stale)"
+    }
+
     # -- and the browser payload shows the new state --------------------------
     $sk3 = Get-JsonResult (Invoke-Api -Method 'GET' -Path 'api/skills' -Token $Token) 'GET /api/skills after CRUD'
     $names3 = @($sk3.skills | ForEach-Object { $_.name })

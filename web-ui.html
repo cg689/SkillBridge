@@ -889,7 +889,7 @@
         <div class="section-head"><h2>总览</h2><span class="hint" id="overview-hint"></span></div>
         <section class="stats" id="stats"></section>
 
-        <div class="section-head"><h2>同步目标</h2><span class="hint">点击任意卡片查看明细（缺失 / 残留 / 工具自有 / 冲突）</span></div>
+        <div class="section-head"><h2>同步目标</h2><span class="hint">点击任意卡片查看明细（缺失 / 残留 / 过期 / 工具自有 / 冲突）</span></div>
         <section class="targets" id="targets"></section>
 
         <div class="section-head"><h2>数据库与日志</h2><span class="hint">check-db-sync.py 只报告，不修改 CC Switch 数据库</span></div>
@@ -1545,6 +1545,11 @@
       detail += chipRow(missing) || '<div class="detail-empty">无 — 该目标已包含全部源技能。</div>';
       detail += '<h4>我们留下、但源技能已删除 <span class="n">' + orphans.length + '</span></h4>';
       detail += chipRow(orphans, true) || '<div class="detail-empty">无。</div>';
+      if (t.stale_list && t.stale_list.length) {
+        detail += '<h4>内容已过期的副本 <span class="n">' + t.stale_list.length + '</span></h4>';
+        detail += chipRow(t.stale_list, true);
+        detail += '<div class="detail-empty">copy 模式的副本与源目录不一致，下一次「立即同步」会刷新它们。</div>';
+      }
       detail += '<h4>不是我们的失效链接 <span class="n">' + dead.length + '</span></h4>';
       detail += chipRow(dead) || '<div class="detail-empty">无。</div>';
       detail += '<h4>工具自己的技能 <span class="n">' + foreign.length + '</span></h4>';
