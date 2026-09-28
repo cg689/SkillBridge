@@ -5,7 +5,8 @@
 # driven) from a browser instead of reading sync-skills.log by hand:
 #
 #   GET  /              the dashboard (web-ui.html, token injected)
-#   GET  /assets/*      the vendored fonts / icon library / animation library
+#   GET  /assets/*      the vendored fonts / icon library / animation library,
+#                        and the brand icon for the browser tab
 #   GET  /api/status    one snapshot: source, every target, last run
 #   GET  /api/skills    every source skill: description, size, where it landed
 #   POST /api/sync      run sync-skills.ps1 and return its output
@@ -71,17 +72,19 @@ $script:Reasons = @{
 # refuses before the process has to buffer more.
 $MaxBodyBytes = 50331648   # 48 MB
 
-# The four files web-ui.html loads from /assets/. Exact names, exact MIME types:
-# a whitelist, not a directory listing, so there is nothing for a traversal
-# attempt to name. Serving them is deliberately NOT behind the token gate — they
-# are the same bytes for every visitor and hiding them breaks nothing except the
-# page itself, while the token's job is to stop other sites from acting on the
-# skills, which only the /api/ routes do.
+# The four files web-ui.html loads from /assets/, plus the brand icon the tab
+# shows. Exact names, exact MIME types: a whitelist, not a directory listing,
+# so there is nothing for a traversal attempt to name. Serving them is
+# deliberately NOT behind the token gate — they are the same bytes for every
+# visitor and hiding them breaks nothing except the page itself, while the
+# token's job is to stop other sites from acting on the skills, which only the
+# /api/ routes do.
 $script:StaticFiles = [ordered]@{
     'assets/vendor/motion.min.js'             = 'text/javascript; charset=utf-8'
     'assets/vendor/lucide.min.js'             = 'text/javascript; charset=utf-8'
     'assets/vendor/inter-var.woff2'           = 'font/woff2'
     'assets/vendor/jetbrains-mono-var.woff2'  = 'font/woff2'
+    'assets/brand/skillbridge.svg'            = 'image/svg+xml'
 }
 
 function Send-Response {

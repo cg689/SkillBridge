@@ -13,7 +13,7 @@
 
 ## 更新到新版本
 
-`web-ui.ps1` 用一张白名单表把 `/assets/` 下的路径映射成 MIME 类型，只允许下面这四个文件名（见 `Handle-Request` 里的 `$script:StaticFiles`）。换版本时保持文件名不变即可；如果改了名，记得同步那张表：
+`web-ui.ps1` 用一张白名单表把 `/assets/` 下的路径映射成 MIME 类型，只允许下面这四个 vendor 文件名，外加 `assets/brand/skillbridge.svg`——本项目自己的品牌图标（favicon，不是第三方库，所以不放 vendor/）。换版本时保持文件名不变即可；如果改了名，记得同步那张表：
 
 ```powershell
 curl -L -o assets/vendor/motion.min.js  https://cdn.jsdelivr.net/npm/motion@10.18.0/dist/motion.umd.min.js
@@ -24,4 +24,4 @@ curl -L -o assets/vendor/lucide.min.js  https://cdn.jsdelivr.net/npm/lucide@0.46
 
 ## 这些文件是怎么被送出去的
 
-`web-ui.ps1` 只认这张表里的四个名字：`GET /assets/vendor/<文件名>` 才通，其他方法 405；不在表里的路径、带 `..` 的路径、`config.json`、不存在的路径、目录，一律 404；每个响应都不缓存（`no-store`）。断言这些用的是**裸 socket**（`Invoke-Raw`）而不是 `HttpWebRequest`——`Uri` 类会在客户端把 `..` 折掉，那样测到的是客户端，不是服务端。页面少了哪个文件也不要紧：图标和动效都有兜底，页面会安静退化，不会半张脸。
+`web-ui.ps1` 只认这张表里的名字：`GET /assets/vendor/<文件名>` 和 `GET /assets/brand/skillbridge.svg` 才通，其他方法 405；不在表里的路径、带 `..` 的路径、`config.json`、不存在的路径、目录，一律 404；每个响应都不缓存（`no-store`）。断言这些用的是**裸 socket**（`Invoke-Raw`）而不是 `HttpWebRequest`——`Uri` 类会在客户端把 `..` 折掉，那样测到的是客户端，不是服务端。页面少了哪个文件也不要紧：图标和动效都有兜底，页面会安静退化，不会半张脸。

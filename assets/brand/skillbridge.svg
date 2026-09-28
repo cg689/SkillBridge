@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="SkillBridge">
+  <title>SkillBridge</title>
+  <!-- The mark: one span from the CC Switch source to every agent tool. An arch
+       bridge, because the project is a bridge, and because the silhouette stays
+       readable at the 16px a browser tab gives it. Brand teal (#2dd4bf /
+       #5eead4) on the dashboard's own dark surface (#141922 / #0b0e14). -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#0b0e14"/>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="none" stroke="#ffffff" stroke-opacity=".08"/>
+  <path d="M13 44 Q32 15 51 44" fill="none" stroke="#2dd4bf" stroke-width="5" stroke-linecap="round"/>
+  <path d="M12 44 H52" stroke="#5eead4" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="12" cy="44" r="4.5" fill="#e8edf6"/>
+  <circle cx="52" cy="44" r="4.5" fill="#e8edf6"/>
+  <circle cx="32" cy="22" r="3.5" fill="#e8edf6"/>
+</svg>

@@ -503,6 +503,39 @@ try {
     if (-not $la.text -or $la.text -notmatch 'createIcons|icons') {
         throw 'FAIL: assets/vendor/lucide.min.js is not the Lucide bundle'
     }
+
+    # -- the brand icon for the browser tab ------------------------------------
+    # Served untokened like the other disk files: the browser asks for the icon
+    # before any JS can attach a header. An icon nobody links is invisible - the
+    # tab keeps the default globe - so the page head is asserted too.
+    $fav = Invoke-Raw -Path 'assets/brand/skillbridge.svg'
+    if ($fav.code -ne 200) {
+        throw "FAIL: GET /assets/brand/skillbridge.svg returned HTTP $($fav.code) (expected 200)"
+    }
+    if ($fav.type -notmatch 'image/svg\+xml') { throw "FAIL: the icon was served as '$($fav.type)'" }
+    if ($fav.length -lt 300) {
+        throw "FAIL: the icon is only $($fav.length) bytes - truncated or a placeholder"
+    }
+    if ($fav.cache -notmatch 'no-store') {
+        throw "FAIL: the icon is served with Cache-Control '$($fav.cache)' (want no-store)"
+    }
+    if ($fav.text -notmatch '<svg' -or $fav.text -notmatch 'viewBox') {
+        throw 'FAIL: the served icon is not an SVG document'
+    }
+    # Brand teal. An icon that quietly drifts off-palette is a design regression
+    # no functional test would ever catch.
+    if ($fav.text -notmatch '#2dd4bf') {
+        throw 'FAIL: the brand icon lost the brand colour (#2dd4bf)'
+    }
+    $favMiss = Invoke-Raw -Path 'assets/brand/nope.svg'
+    if ($favMiss.code -eq 200) {
+        throw 'FAIL: an unlisted name under assets/brand/ was served - the whitelist let something through'
+    }
+    $pageIcon = Invoke-Raw -Path ''
+    if ($pageIcon.code -ne 200 -or
+        $pageIcon.text -notmatch 'rel="icon"[^>]*assets/brand/skillbridge\.svg') {
+        throw 'FAIL: the page does not link the brand icon (the tab would keep the default icon)'
+    }
     foreach ($bad in @(
         @{ p = 'assets/vendor/../web-ui.ps1';        why = 'a traversal out of assets/' },
         @{ p = 'assets/../config.json';              why = 'a traversal to a config file' },
