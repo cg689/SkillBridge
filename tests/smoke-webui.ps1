@@ -440,6 +440,52 @@ try {
     if ($handlerSrc -notmatch 'data-check' -or $handlerSrc.IndexOf('data-check') -gt $handlerSrc.IndexOf('skill-group-head')) {
         throw 'FAIL: the row click handler can open a detail on a tick-box click (data-check is not checked first)'
     }
+    # The label is wider than the 14px box it wraps, so most of the cell is label
+    # padding, and a click there is a click on the label: the browser forwards it
+    # to the box while the original click keeps bubbling to the row. One gesture,
+    # two outcomes (checked in a real browser). The handler has to swallow the
+    # cell itself, before the row branch can see it.
+    if ($handlerSrc -notmatch "contains\('cell-sel'\)" -or $handlerSrc -notmatch 'preventDefault') {
+        throw 'FAIL: the tick cell swallows no click of its own, so the label padding ticks the box AND opens the row'
+    }
+    if ($handlerSrc.IndexOf('cell-sel') -gt $handlerSrc.IndexOf('skill-group-head')) {
+        throw 'FAIL: the tick cell is handled after the row, so its padding still opens the detail'
+    }
+    # A shift range has to follow the rows as they are on screen. The grouped
+    # view buckets them by category, so a range built from the skills list ticks
+    # a different set than the operator dragged across.
+    if ($page.text -notmatch 'function domRowNames' -or $page.text -notmatch "querySelectorAll\('\.skill-row'\)") {
+        throw 'FAIL: nothing reads the rows off the screen, so a shift range cannot follow them'
+    }
+    $tickSrc = [regex]::Match($page.text, 'function selTick\(name, on, ev\) \{[\s\S]*?\n  \}').Value
+    if ($tickSrc -notmatch 'domRowNames' -or $tickSrc -match 'visibleSkills') {
+        throw 'FAIL: the shift range is built from the skills list, not from the rows on screen'
+    }
+    # What is ticked has to be announced, from a region that is always in the
+    # DOM: the bar is hidden until the first tick, and a live region that appears
+    # together with its text is not read out.
+    if ($page.text -notmatch 'id="sel-live"' -or $page.text -notmatch 'aria-live="polite"' -or
+        $page.text -notmatch 'role="status"' -or $page.text -notmatch '\.sr-only') {
+        throw 'FAIL: the selection is not announced to a screen reader from a permanent off-screen region'
+    }
+    # A batch that half-succeeded must re-arm with only the names that are left,
+    # or the next press posts the deleted ones again and reports them as failures.
+    # Extracted from the response handler's failure branch, because the page is
+    # one file and the only defence against this being written but unreachable
+    # is to read exactly what that branch does.
+    $failSrc = [regex]::Match($page.text, "var done = \(data && data\.deleted\) \|\| \[\];[\s\S]*?loadSkills\(true\);").Value
+    if ($failSrc -notmatch 'pendingDeletes = left' -or $failSrc -notmatch "del-confirm'\)\.textContent" -or
+        $failSrc -notmatch "del-names'\)\.innerHTML" -or $failSrc -match 'if \(false\)') {
+        throw 'FAIL: a partial delete does not re-arm the dialog with the names that remain'
+    }
+    # ... and that call picks its route by how many names are left. The retry
+    # after a half-finished batch carries one name, which belongs on the
+    # single-delete route (with a "name"), not back on the batch one.
+    $deleteSrc = [regex]::Match($page.text, "api\(one \? '/api/skills/delete'[\s\S]*?function \(data\) \{").Value
+    if ($deleteSrc -notmatch "'/api/skills/delete-many'" -or $deleteSrc -notmatch 'names\[0\]' -or
+        $deleteSrc -notmatch 'names: names') {
+        throw 'FAIL: the delete call does not choose its route and payload by count'
+    }
     # Keyboard users get a visible ring; the rest of the page relies on it.
     if ($page.text -notmatch ':focus-visible') {
         throw 'FAIL: the page has no :focus-visible ring, so it is unusable without a mouse'

@@ -622,6 +622,11 @@
   .skills-selbar[hidden] { display: none; }
   .sel-count { color: var(--brand-text); font-weight: 700; font-variant-numeric: tabular-nums; }
   .sel-total { color: var(--text-3); font-size: 11.8px; font-variant-numeric: tabular-nums; }
+  /* Off-screen but still read out: the live region for what is ticked. */
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
+  }
 
   .del-names {
     max-height: 168px; overflow: auto; margin: 10px 0 0; padding: 8px;
@@ -994,9 +999,13 @@
             <span class="sel-total" id="sel-total"></span>
             <span class="grow"></span>
             <button type="button" class="btn sm" id="sel-invert" title="反选当前可见的技能">反选</button>
-            <button type="button" class="btn sm" id="sel-none" title="取消所有选择">取消选择</button>
+            <button type="button" class="btn sm" id="sel-none" title="取消选择">取消选择</button>
             <button type="button" class="btn sm danger" id="sel-delete" title="删除选中的技能（需确认）">删除所选</button>
           </div>
+          <!-- The bar itself is hidden until something is ticked, so it is the
+               wrong place to announce a selection: a region that appears
+               together with its text is not spoken. This one never hides. -->
+          <span class="sr-only" id="sel-live" role="status" aria-live="polite"></span>
           <div class="skills-table">
             <div class="skills-thead" id="skills-thead">
               <div class="th-check"><input type="checkbox" id="skills-check-all" title="全选/取消当前可见的技能" aria-label="全选当前可见的技能"></div>
@@ -1021,7 +1030,7 @@
   </div>
 </div>
 
-<div class="toasts" id="toasts"></div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
 <!-- ------------------------------------------------------------- 删除技能 -->
 <div class="overlay" id="del-overlay" hidden>
@@ -1879,6 +1888,54 @@
     renderSelBar();
     syncHeadCheck();
   }
+  // The rows in the order they are on screen. A shift-range has to follow what
+  // the operator sees, and the DOM is the only place that order exists: the
+  // grouped view buckets rows by category, so neither the skills list nor the
+  // sort state describes it on its own.
+  function domRowNames() {
+    var host = $('skills-list');
+    if (!host) return [];
+    return Array.prototype.slice.call(host.querySelectorAll('.skill-row'))
+      .map(function (r) { return r.getAttribute('data-name'); });
+  }
+  // Shift+click ticks every row between the last one ticked and this one - the
+  // gesture people already know from file managers and data tables, and the only
+  // way to take a batch out of a 20-row list without 20 separate clicks.
+  var lastTick = null;
+  function selTick(name, on, ev) {
+    if (ev && ev.shiftKey && lastTick && lastTick !== name) {
+      var rows = domRowNames();
+      var a = -1, b = -1;
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i] === lastTick) a = i;
+        if (rows[i] === name) b = i;
+      }
+      // A name the current filter hides can't anchor a range, so fall back to
+      // the plain tick rather than guessing which rows the operator meant.
+      if (a >= 0 && b >= 0) {
+        if (a > b) { var swap = a; a = b; b = swap; }
+        for (var j = a; j <= b; j++) {
+          var nm = rows[j];
+          skillState.sel[nm] = true;
+          // Patching the rows in place, the way a single tick does: repainting
+          // would collapse every open detail, throw away the scroll position
+          // and drop the focus off the box that was just shift-clicked.
+          var el = rowEl(nm);
+          if (el) {
+            el.classList.add('picked');
+            var bx = el.querySelector('input[data-check]');
+            if (bx) bx.checked = true;
+          }
+        }
+        lastTick = name;
+        renderSelBar();
+        syncHeadCheck();
+        return;
+      }
+    }
+    lastTick = on ? name : null;
+    selToggle(name, on);
+  }
   // The header box means "every row I can currently see", not "every row there
   // is": ticking 40 names under a name filter and then 80 more by clearing it
   // would be a surprise nobody wants from a checkbox.
@@ -1917,17 +1974,29 @@
     if (!bar) return;
     var names = selNames();
     bar.hidden = names.length === 0;
-    if (!names.length) return;
-    var files = 0, size = 0, gone = 0;
+    var live = $('sel-live');
+    if (!names.length) { if (live) live.textContent = ''; return; }
+    var files = 0, size = 0, hidden = 0;
+    var rows = visibleSkills(), vis = {};
+    for (var v = 0; v < rows.length; v++) vis[rows[v].name] = true;
     for (var i = 0; i < names.length; i++) {
+      // Every name in the selection still has a row somewhere: loadSkills prunes
+      // what a delete took away, so there is no "already gone" case to report.
       var s = findSkill(names[i]);
-      if (!s) { gone++; continue; }
-      files += s.files || 0;
-      size += s.size || 0;
+      files += (s && s.files) || 0;
+      size += (s && s.size) || 0;
+      if (!vis[names[i]]) hidden++;
     }
     $('sel-count').textContent = '已选 ' + names.length + ' 个技能';
     $('sel-total').textContent = '共 ' + num(files) + ' 个文件、约 ' + skillSizeText(size) +
-      (gone ? '（其中 ' + gone + ' 个已不在源目录）' : '');
+      (hidden ? '（' + hidden + ' 个被当前筛选藏住，全选与反选只对看得见的行生效）' : '');
+    // Naming up to a dozen of them is what makes the bar reviewable by ear; past
+    // that the count is the only thing worth listening to.
+    if (live) {
+      live.textContent = names.length <= 12
+        ? ('已选 ' + names.length + ' 个技能：' + names.join('、'))
+        : ('已选 ' + names.length + ' 个技能');
+    }
   }
 
   function findSkill(name) {
@@ -2229,6 +2298,17 @@
           // Whatever did go through must not stay ticked: the list is about to
           // be re-read, and a selection pointing at a deleted name is a trap.
           for (var i = 0; i < done.length; i++) delete skillState.sel[done[i].name];
+          // Re-arm with only what is left, so a second press retries the
+          // remainder instead of posting the names that are already gone and
+          // reporting them all over again as failures.
+          if (bad.length) {
+            var left = bad.map(function (f) { return f.name; });
+            pendingDeletes = left;
+            $('del-title').textContent = '删除 ' + left.length + ' 个技能';
+            $('del-sub').textContent = left.length + ' 个技能';
+            $('del-names').innerHTML = left.map(function (n) { return '<code>' + esc(n) + '</code>'; }).join('');
+            $('del-confirm').textContent = '删除 ' + left.length + ' 个技能';
+          }
           loadSkills(true);
           refresh();
         }
@@ -2481,7 +2561,18 @@
         // sits inside the row: check it before the row handler below can see
         // the bubbled click.
         if (t.getAttribute && t.getAttribute('data-check')) {
-          selToggle(t.getAttribute('data-check'), !!t.checked);
+          selTick(t.getAttribute('data-check'), !!t.checked, ev);
+          return;
+        }
+        // The label is wider than the 14px box it wraps, so most of the cell is
+        // label padding. A click there would bubble to the row below and open
+        // its detail *and* be forwarded to the box by the label's own activation
+        // behaviour - one gesture, two outcomes. Swallow it here and do the
+        // ticking ourselves.
+        if (t.classList && t.classList.contains('cell-sel')) {
+          ev.preventDefault();
+          var cb = t.querySelector('input[data-check]');
+          if (cb) { cb.checked = !cb.checked; selTick(cb.getAttribute('data-check'), cb.checked, ev); }
           return;
         }
         if (t.classList && t.classList.contains('skill-group-head')) {

@@ -300,6 +300,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the file itself.
 
 ### Fixed
+- **A tick in the skill browser did two things at once.** The tick box is wrapped
+  in a `<label>` that fills its whole cell, so most of the clickable area is label
+  padding. A click there did not toggle once: the label's own activation forwarded
+  a synthetic click to the box (ticking it) *and* the click bubbled on to the row
+  handler, which opened that row's detail — one gesture, two outcomes. The cell
+  swallows the click and does the ticking itself now, so a tick is only ever a
+  tick. The smoke suite refuses the version of the handler that checks the row
+  before the box.
+- **Shift-click ranged over the wrong rows.** The range was built from the skills
+  array, but the table renders that array sorted (by whatever column is active)
+  and, in 全部, bucketed into one group per category — so the order of the array
+  is not the order of the rows on screen, and shift-clicking two neighbours could
+  tick half the table. The range is read off the rendered rows (`domRowNames`)
+  now, and the suite fails a range that reads the skills list.
+- **A selection was never announced.** The bar that says 已选 N 个技能 only exists
+  once something is ticked, and a live region that appears together with its text
+  is not spoken — so a screen reader stayed silent through the whole gesture. The
+  announcement now sits in a permanent off-screen `role="status"` region that is
+  always in the DOM, and the toasts container is a polite live region as well.
+- **The batch bar hid part of its own selection.** 反选 and the header box act on
+  the rows that can be seen, so a filter that hid a ticked row left the total
+  silently wrong; the bar now counts those rows and says that the two bulk
+  actions only reach the visible ones.
+- **A half-finished batch delete dropped its own remainder.** The route answers
+  with what went and what did not, and the page read anything that was not
+  `ok: true` as a plain failure: it kept the first press's names, so a second
+  press re-sent folders that were already gone and reported them as failures
+  again. The dialog stays open now and re-arms itself with only the names that
+  failed and the reason for each, and the retry goes to whichever of the two
+  delete routes the remaining count calls for.
 - **Ownership was judged by how a link is spelled, not by where it lands.** CC
   Switch's store once lived on `C:\Software\CCSwitch\cc-switch-data\skills` and
   now lives on `D:\...`; the links it left in
