@@ -285,6 +285,60 @@ function Write-ManagedSkills {
     [IO.File]::WriteAllText($file, $json, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+function Get-ResolvedPath {
+    param(
+        [string]$Path,
+        [int]$MaxHops = 8
+    )
+    # Follow every junction / symlink along a path and return where it LANDS.
+    # [IO.Path]::GetFullPath is purely lexical: a target spelled with an old
+    # drive letter, or with a store that has since been moved, can point at the
+    # very same directory through the links in between, and only a resolved path
+    # shows that. A component that does not exist is kept as written, so a dead
+    # link still resolves to the place it was aimed at.
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $Path }
+    try {
+        $full = [IO.Path]::GetFullPath($Path)
+    } catch {
+        return $Path
+    }
+    # The \\?\ prefix a resolved path can carry is not comparable with a path
+    # from config.json.
+    if ($full.StartsWith('\\?\')) { $full = $full.Substring(4) }
+    $parts = @($full.Split('\'))
+    $current = $parts[0]
+    $start = 1
+    if ($full.StartsWith('\\') -and $parts.Count -ge 3) {
+        # \\server\share\... : the first two components are not a link target.
+        $current = '\\' + $parts[2]
+        $start = 3
+    }
+    for ($i = $start; $i -lt $parts.Count; $i++) {
+        if ([string]::IsNullOrEmpty($parts[$i])) { continue }
+        $next = Join-Path $current $parts[$i]
+        $hops = 0
+        while ($hops -lt $MaxHops) {
+            $it = Get-Item -LiteralPath $next -Force -ErrorAction SilentlyContinue
+            if ($null -eq $it -or -not (Test-ReparsePoint $it)) { break }
+            $t = @($it.Target) | Where-Object { $_ } | Select-Object -First 1
+            if (-not $t) { break }
+            $t = [string]$t
+            # A relative target is written against the link's own folder, which
+            # is where the walk is standing ($current), not the process CWD.
+            if (-not [IO.Path]::IsPathRooted($t)) { $t = Join-Path $current $t }
+            try {
+                $next = [IO.Path]::GetFullPath($t)
+            } catch {
+                break
+            }
+            if ($next.StartsWith('\\?\')) { $next = $next.Substring(4) }
+            $hops++
+        }
+        $current = $next
+    }
+    return $current
+}
+
 function Test-OurSkillEntry {
     param(
         $Item,
@@ -311,6 +365,30 @@ function Test-OurSkillEntry {
             $normT.StartsWith("$normSrc\", [StringComparison]::OrdinalIgnoreCase) -or
             $normT.StartsWith("$normSrc/", [StringComparison]::OrdinalIgnoreCase)) {
             return $true
+        }
+        # The target is not SPELLED like the source, but the place it RESOLVES
+        # to can be. CC Switch's store once lived on another drive, and the
+        # links it left in %USERPROFILE%\.cc-switch\skills are still spelled with
+        # that old path — which no longer exists — yet they resolve into the
+        # source through a junction in between. Judging by the resolved path is
+        # what keeps those links ours; judging by the string split the source
+        # off from its own links the day the store moved (every target showed
+        # 0/123, 缺 123, 死链 N with a full folder of working links inside).
+        # Links only: a real folder is the tool's by definition, whatever it
+        # happens to contain.
+        if (Test-ReparsePoint $Item) {
+            $resolvedSrc = Get-ResolvedPath $SourceRoot
+            $resolvedT = Get-ResolvedPath $normT
+            if (-not [string]::IsNullOrEmpty($resolvedSrc) -and
+                -not [string]::IsNullOrEmpty($resolvedT)) {
+                $rSrc = $resolvedSrc.TrimEnd('\', '/')
+                $rT = $resolvedT.TrimEnd('\', '/')
+                if ($rT.Equals($rSrc, [StringComparison]::OrdinalIgnoreCase) -or
+                    $rT.StartsWith("$rSrc\", [StringComparison]::OrdinalIgnoreCase) -or
+                    $rT.StartsWith("$rSrc/", [StringComparison]::OrdinalIgnoreCase)) {
+                    return $true
+                }
+            }
         }
     }
     return $false
@@ -1186,6 +1264,10 @@ function Get-SkillBridgeStatus {
                     }
                     if (-not $resolved -or -not (Test-Path -LiteralPath $resolved)) {
                         $row.dead += $item.Name
+                        # A name alone cannot be acted on: this is the one entry
+                        # the sync deliberately leaves alone, so the user needs
+                        # to see where it points in order to judge it.
+                        $row.issues += "$($item.Name): dead link points at $resolved (not ours, left alone)"
                     }
                     continue
                 }

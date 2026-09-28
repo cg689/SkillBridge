@@ -275,6 +275,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the file itself.
 
 ### Fixed
+- **Ownership was judged by how a link is spelled, not by where it lands.** CC
+  Switch's store once lived on `C:\Software\CCSwitch\cc-switch-data\skills` and
+  now lives on `D:\...`; the links it left in
+  `%USERPROFILE%\.cc-switch\skills\<name>` are still spelled with the old path,
+  which no longer exists, yet they resolve into the source through the
+  `.cc-switch` junction. `Test-OurSkillEntry` compared the raw target string
+  against the configured source, so every one of those links was "not ours": a
+  target that was completely in sync showed `0/123, 缺 123, 死链 47` (the live
+  links counted as missing because an entry with that name existed but could not
+  be claimed, and the dead ones could never be pruned because they were never
+  provably ours). The raw-prefix check still runs first and still wins; when it
+  does not match, both sides are now resolved through every junction and symlink
+  along the way — `Get-ResolvedPath` in `common.psm1`, `resolves_into` in
+  `sync-skills.sh` — and compared again. A link whose final destination is inside
+  the source is ours wherever it was aimed, so a store that moves again no longer
+  splits the source off from its own links. Links only: a real directory stays
+  the tool's own folder regardless of what it contains, and a link that resolves
+  outside the source is still not ours (a dangling shortcut to an unmounted drive
+  must survive).
+- The Unix twin could not read its config on a machine whose `python3` is a
+  Windows build: `print()` emits `\r\n`, `read -d ''` splits on `\n` only, so
+  every path picked up a trailing carriage return and the source "did not exist".
+  The CRs are dropped once, where the config is read.
 - **`Read-ConfigFile` read `config.json` as ANSI, not UTF-8.** PowerShell 5.1's
   `Get-Content -Raw` decodes with the machine's code page unless the file carries
   a BOM, and `config.json` is written without one — with a hand-written

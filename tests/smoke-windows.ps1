@@ -4,12 +4,14 @@
 # sync-skills.ps1 several times, and asserts: junction created, underscore
 # archives skipped, tool-owned dirs left alone, the junction AND copy of a
 # DELETED source skill pruned, while a dangling junction that is not ours (its
-# target is outside the source) survives untouched. Also runs
-# detect-tools.ps1 -All and asserts it produces a valid config.json that includes
-# Cursor, honours `exclude` (never re-adds a deliberately removed tool) and keeps
-# custom targets; that a copy which died halfway is left marked and repaired on
-# the next run; and asserts install-autolink.ps1 -DryRun changes nothing even
-# when autolink.enabled=false. Summary assertions go through Assert-HaveSummary
+# target is outside the source) survives untouched; that a link spelled with an
+# old path that no longer exists still counts as ours when it RESOLVES into the
+# source (a dead one of those gets pruned, one whose hop lands outside the
+# source does not). Also runs detect-tools.ps1 -All and asserts it produces a
+# valid config.json that includes Cursor, honours `exclude` (never re-adds a
+# deliberately removed tool) and keeps custom targets; that a copy which died
+# halfway is left marked and repaired on the next run; and asserts
+# install-autolink.ps1 -DryRun changes nothing even when autolink.enabled=false. Summary assertions go through Assert-HaveSummary
 # first, because `$x -notmatch 'y'` on a command that printed nothing returns an
 # empty array and passes silently. Restores the repo's sync-skills.log and
 # config.json afterwards.
@@ -330,7 +332,81 @@ try {
         throw 'FAIL: junction into a source-sibling no longer points at the backup copy'
     }
 
-    Write-Host 'OK: windows smoke (junction+copy, marker ownership, relative-target symlink kept, not-ours dangling junction kept, deleted skill pruned, sibling-prefix not ours, scripts refresh, dest!=src, Cursor upgrade, -CopyInto)'
+    # --- ownership by where a link LANDS, not how it is spelled ----------------
+    # CC Switch's store once lived on another drive: the links it left in
+    # %USERPROFILE%\.cc-switch\skills are spelled with that old path, which no
+    # longer exists, yet they resolve into the source through a junction in
+    # between. On the real machine that left a target showing 0/123, 缺 123 and
+    # 死链 N with a full folder of working links inside. `hop-store` stands in
+    # for the old data dir, `hop-tgt` for the target CC Switch had filled.
+    $hopStore = Join-Path $tmp 'hop-store'
+    New-Item -ItemType Directory -Path $hopStore -Force | Out-Null
+    New-Item -ItemType Junction -Path (Join-Path $hopStore 'skills') -Target (Join-Path $tmp 'src') | Out-Null
+    $hopTgt = Join-Path $tmp 'hop-tgt'
+    New-Item -ItemType Directory -Path $hopTgt -Force | Out-Null
+    # Live: spelled through the hop, resolves into the source -> ours, and the
+    # "never overwrite what is there" rule keeps it exactly as CC Switch left it.
+    New-Item -ItemType Junction -Path (Join-Path $hopTgt 'demo-skill') `
+        -Target (Join-Path $hopStore 'skills\demo-skill') | Out-Null
+    # Dead: same spelling, the skill is gone from the source -> ours and dead ->
+    # the prune pass owes it a removal. mklink needs the target to exist, so the
+    # real folder is created first and deleted after the link is in place.
+    New-Item -ItemType Directory -Path (Join-Path $tmp 'src\hop-gone-skill') -Force | Out-Null
+    New-Item -ItemType Junction -Path (Join-Path $hopTgt 'hop-gone-skill') `
+        -Target (Join-Path $hopStore 'skills\hop-gone-skill') | Out-Null
+    Remove-Item -LiteralPath (Join-Path $tmp 'src\hop-gone-skill') -Recurse -Force
+    # NOT ours, and dead too: the hop lands in the source's SIBLING. It must
+    # survive both the ownership rule and the prune pass.
+    New-Item -ItemType Directory -Path (Join-Path $tmp 'src-backup\hop-not-ours') -Force | Out-Null
+    New-Item -ItemType Junction -Path (Join-Path $tmp 'hop-other') -Target (Join-Path $tmp 'src-backup') | Out-Null
+    New-Item -ItemType Junction -Path (Join-Path $hopTgt 'hop-not-ours') `
+        -Target (Join-Path $tmp 'hop-other\hop-not-ours') | Out-Null
+    Remove-Item -LiteralPath (Join-Path $tmp 'src-backup\hop-not-ours') -Recurse -Force
+    $hopCfg = @{
+        link_type = 'junction'
+        source    = (Join-Path $tmp 'src')
+        targets   = @{ Hop = $hopTgt }
+        check_db  = $false
+    } | ConvertTo-Json -Depth 8
+    $hopCfgPath = Join-Path $tmp 'cfg-hop.json'
+    [System.IO.File]::WriteAllText($hopCfgPath, $hopCfg, (New-Object System.Text.UTF8Encoding($false)))
+    $hopOut = & (Join-Path $root 'sync-skills.ps1') -ConfigPath $hopCfgPath
+    Assert-HaveSummary $hopOut 'legacy-hop run'
+    if ($hopOut -notmatch 'pruned=1') {
+        throw ("FAIL: the dead link spelled through the hop was not pruned - it resolves " +
+            "into the source, so it is ours (got: $hopOut)")
+    }
+    $hopLink = Get-Item (Join-Path $hopTgt 'demo-skill') -Force
+    if ($hopLink.LinkType -ne 'Junction') {
+        throw 'FAIL: the live legacy-spelled link was replaced instead of kept as ours'
+    }
+    if ([string]$hopLink.Target -ne (Join-Path $hopStore 'skills\demo-skill')) {
+        throw "FAIL: the live legacy-spelled link was re-pointed (target=$($hopLink.Target))"
+    }
+    if (Test-Path (Join-Path $hopTgt 'hop-gone-skill')) {
+        throw 'FAIL: the dead legacy-spelled link survived the prune pass'
+    }
+    if (-not (Test-Path (Join-Path $hopTgt 'hop-not-ours'))) {
+        throw 'FAIL: a dead link whose hop lands OUTSIDE the source was pruned - it is not ours'
+    }
+
+    # The resolver itself, spelled path vs where it lands. A component that does
+    # not exist is kept as written, which is what makes a dead link resolve to
+    # the place it was aimed at instead of to nothing.
+    $resolvedLive = Get-ResolvedPath (Join-Path $hopStore 'skills\demo-skill')
+    if ($resolvedLive -ne (Join-Path $tmp 'src\demo-skill')) {
+        throw "FAIL: Get-ResolvedPath did not follow the hop (got $resolvedLive)"
+    }
+    $resolvedGone = Get-ResolvedPath (Join-Path $hopStore 'skills\hop-gone-skill')
+    if ($resolvedGone -ne (Join-Path $tmp 'src\hop-gone-skill')) {
+        throw "FAIL: a missing final component changed the resolved path (got $resolvedGone)"
+    }
+    $resolvedOther = Get-ResolvedPath (Join-Path $tmp 'hop-other\demo-skill')
+    if ($resolvedOther -ne (Join-Path $tmp 'src-backup\demo-skill')) {
+        throw "FAIL: the hop into the source's sibling resolved to $resolvedOther"
+    }
+
+    Write-Host 'OK: windows smoke (junction+copy, marker ownership, relative-target symlink kept, not-ours dangling junction kept, deleted skill pruned, sibling-prefix not ours, legacy-spelled link ours by resolution, hop into sibling not ours, scripts refresh, dest!=src, Cursor upgrade, -CopyInto)'
 
     # detect-tools: produces a valid config.json that includes Cursor
     & (Join-Path $root 'detect-tools.ps1') -All | Out-Null

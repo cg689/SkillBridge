@@ -150,6 +150,11 @@ config_out="$(read_config)" || {
     echo "[ERROR] failed to read config: $CONFIG" >&2
     exit 1
 }
+# A python3 built for Windows prints \r\n, and read -d '' splits on \n only, so
+# every line would keep a trailing \r - a path with one at the end does not
+# exist. No path ever contains a carriage return, so drop them once here rather
+# than teach every consumer about it.
+config_out="${config_out//$'\r'/}"
 IFS=$'\n' read -r -d '' -a CONFIG_LINES <<< "$config_out" || true
 if [ ${#CONFIG_LINES[@]} -lt 1 ]; then
     echo "[ERROR] failed to read config: $CONFIG" >&2
@@ -265,6 +270,25 @@ same_path() {
     python3 -c 'import os,sys; print("1" if os.path.realpath(sys.argv[1])==os.path.realpath(sys.argv[2]) else "0")' "$1" "$2"
 }
 
+# Whether a path LANDS inside a directory once every symlink along it is
+# followed. readlink -f canonicalizes what exists and keeps a missing tail, so a
+# dead link still resolves to the place it was aimed at - exactly what the
+# fallback in is_our_link needs. It stays in the shell's own namespace on
+# purpose: a python3 built for Windows spells paths differently than MSYS does,
+# and the two would never compare equal.
+resolves_into() {
+    local t s
+    t="$(readlink -f "$1" 2>/dev/null)" || return 1
+    s="$(readlink -f "$2" 2>/dev/null)" || return 1
+    [ -n "$t" ] && [ -n "$s" ] || return 1
+    t="${t%/}"
+    s="${s%/}"
+    case "$t" in
+        "$s"|"$s"/*) return 0 ;;
+    esac
+    return 1
+}
+
 is_our_link() {
     local dest="$1"
     [ -L "$dest" ] || return 1
@@ -279,6 +303,13 @@ is_our_link() {
     case "$abs" in
         "$srcn"|"$srcn"/*) return 0 ;;
     esac
+    # The target is not SPELLED like the source, but the place it RESOLVES to
+    # can be: a store that has since moved leaves links spelled with the old
+    # path, which still land in the source through the links in between.
+    # Judging by the resolved path keeps those links ours; judging by the string
+    # splits the source off from its own links the day the store moved. Mirrors
+    # the resolution fallback in Test-OurSkillEntry (common.psm1).
+    resolves_into "$abs" "$srcn" && return 0
     return 1
 }
 

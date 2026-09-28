@@ -6,7 +6,10 @@
 # unset %HERMES_HOME% target is skipped with a warning and never degrades to
 # creating /skills at the filesystem root; that underscore-prefixed archives are
 # not linked; that the link AND copy of a deleted source skill are pruned while a
-# dead symlink we do not own (target outside the source) survives; that a copy
+# dead symlink we do not own (target outside the source) survives; that a link
+# spelled with an old path that no longer exists still counts as ours when it
+# RESOLVES into the source (a dead one of those gets pruned, one whose hop lands
+# outside the source does not); that a copy
 # which died halfway is left marked and repaired on the next run; that
 # detect-tools.sh --all writes a valid config.json and honours `exclude`; and that
 # a missing/invalid option value fails fast instead of spinning. Restores the repo
@@ -346,7 +349,55 @@ if ! grep -q 'backup' "$TMP/own-tgt/demo-skill/SKILL.md"; then
     exit 1
 fi
 
-echo "OK: unix smoke (link+copy, marker ownership, relative-target symlink kept, not-ours dead link kept, deleted skill pruned, sibling-prefix not ours, scripts refresh, dest!=src, Cursor upgrade, --copy-into)"
+# Ownership by where a link LANDS, not how it is spelled. CC Switch's store once
+# lived on another drive: the links it left in ~/.cc-switch/skills are spelled
+# with that old path, which no longer exists, yet they resolve into the source
+# through a junction in between. `hop-store` stands in for the old data dir,
+# `hop-tgt` for the target CC Switch had filled.
+HOP_STORE="$TMP/hop-store"
+HOP_TGT="$TMP/hop-tgt"
+mkdir -p "$HOP_STORE" "$HOP_TGT"
+ln -s "$SRC" "$HOP_STORE/skills"
+# live: spelled through the hop, resolves into the source -> ours, untouched
+ln -s "$HOP_STORE/skills/demo-skill" "$HOP_TGT/demo-skill"
+# dead: same spelling, the skill is gone from the source -> ours and dead ->
+# the prune pass owes it a removal
+mkdir -p "$SRC/hop-gone-skill"
+ln -s "$HOP_STORE/skills/hop-gone-skill" "$HOP_TGT/hop-gone-skill"
+rm -rf "$SRC/hop-gone-skill"
+# NOT ours, and dead too: the hop lands in the source's SIBLING. It must
+# survive both the ownership rule and the prune pass.
+mkdir -p "${SRC}-backup/hop-not-ours"
+ln -s "${SRC}-backup" "$TMP/hop-other"
+ln -s "$TMP/hop-other/hop-not-ours" "$HOP_TGT/hop-not-ours"
+rm -rf "${SRC}-backup/hop-not-ours"
+cat > "$TMP/cfg-hop.json" <<EOF
+{
+  "link_type": "symlink",
+  "source": "$SRC",
+  "targets": { "Hop": "$HOP_TGT" },
+  "check_db": false
+}
+EOF
+out="$(bash "$ROOT/sync-skills.sh" "$TMP/cfg-hop.json" 2>/dev/null)"
+if ! printf '%s\n' "$out" | grep -q 'pruned=1'; then
+    echo "FAIL: the dead link spelled through the hop was not pruned - it resolves into the source, so it is ours (got: $out)" >&2
+    exit 1
+fi
+if [ ! -L "$HOP_TGT/demo-skill" ] || [ "$(readlink "$HOP_TGT/demo-skill")" != "$HOP_STORE/skills/demo-skill" ]; then
+    echo "FAIL: the live legacy-spelled symlink was replaced or re-pointed" >&2
+    exit 1
+fi
+if [ -L "$HOP_TGT/hop-gone-skill" ]; then
+    echo "FAIL: the dead legacy-spelled symlink survived the prune pass" >&2
+    exit 1
+fi
+if [ ! -L "$HOP_TGT/hop-not-ours" ]; then
+    echo "FAIL: a dead symlink whose hop lands OUTSIDE the source was pruned - it is not ours" >&2
+    exit 1
+fi
+
+echo "OK: unix smoke (link+copy, marker ownership, relative-target symlink kept, not-ours dead link kept, deleted skill pruned, sibling-prefix not ours, legacy-spelled link ours by resolution, hop into sibling not ours, scripts refresh, dest!=src, Cursor upgrade, --copy-into)"
 
 # detect-tools.sh --all writes a config that includes every catalogued tool
 if ! bash "$ROOT/detect-tools.sh" --all >/dev/null; then

@@ -22,7 +22,7 @@ SkillBridge：把 CC Switch 的 skills 目录同步进本机各 agent 工具的 
 | 路径 | 职责 |
 |---|---|
 | `common.psm1` | 共享模块：配置读写（UTF-8 无 BOM）、工具扫描、配置序列化、加和式合并 `Merge-SkillBridgeToolTargets`、归属判定 `Test-OurSkillEntry`、拷贝标记、日志、运行状态、toast |
-| `sync-skills.ps1` / `.sh` | 同步主逻辑。幂等、不覆盖已有条目、只剪自己拥有的死链 |
+| `sync-skills.ps1` / `.sh` | 同步主逻辑。幂等、不覆盖已有条目、只剪自己拥有的死链。归属看链接**最终落在哪**（逐段跟完 junction/符号链接再和源目录比），不是看它字面写成什么样 |
 | `detect-tools.ps1` / `.sh` | 从 `supported-tools.json` **全量重写** config（会丢目标，慎用） |
 | `supported-tools.json` | 工具目录，唯一事实来源（23 个） |
 | `config.example.json`、`支持的软件列表.md` | 与目录对齐，由 `tests/test-catalog.py` 校验 |
@@ -78,6 +78,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\web-ui.ps1 -NoBrowser
 - 新工具进 `supported-tools.json` 时，`config.example.json` 和 `支持的软件列表.md` 必须同步，否则 `test-catalog.py` 失败。
 - 页面 JS 有改：跑 `python scanjs.py`（`node --check` + 未声明调用 + 图标名）。
 - 两个平台的同步语义必须一起改（`.sh` ↔ `.ps1`），冒烟要覆盖同一条规则。
+- **归属看"落点"不看"拼写"**：链接字面写的路径可以早就失效（CC Switch 的仓库从 C: 搬到 D:，`~/.cc-switch/skills` 里遗留的旧拼写链接依然通过中间 junction 落在源目录里）。先按字面前缀比，比不赢再把两边都跟完联接解析一次（`Get-ResolvedPath` / `resolves_into`）。只看字面会把源目录和自己的链接判成两家，症状就是某目标显示 `0/123, 缺 123, 死链 N` 而里面躺着一整排能用的链接。真实目录仍然是工具自己的，链接解析到源目录外面的一律不是我们的。
+- `smoke-unix.sh` 在 Windows 的 Git Bash 里要这样才跑得动（Linux 上直接跑）：`python3` 在这台机器是 WindowsApps 的假存根（退出 49），需要 PATH 前挂一个真 python；`TMPDIR` 不能指向会被 MSYS 重映射的目录（Windows 临时目录会被另看成 `/tmp`，符号链接往返后拼写对不上），也不能用 `/tmp`（本机有外部进程在清它）；`MSYS=winsymlinks:nativestrict`，否则 `ln -s` 悄悄退化成复制目录。`detect-tools` 那段会读仓库里真实的 `config.json`（本机是 Windows 设置 `junction`），所以最后一条断言在本机必然失败，与脚本无关。
 - **禁止为了让测试变绿而改断言、降级安全设置或跳过用例。**
 
 ## 提交与分支约定
