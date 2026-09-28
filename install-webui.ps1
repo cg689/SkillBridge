@@ -53,7 +53,13 @@ $trigger = New-ScheduledTaskTrigger -AtLogOn
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 # No execution time limit: the dashboard is meant to stay up for the whole
 # session. The default 72h cut-off would silently kill it mid-week.
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
+# Restart on failure follows the same idea: web-ui.ps1 exits 0 when it is
+# stopped on purpose (the page's stop button, /api/stop), and non-zero when it
+# dies abnormally - a Ctrl+C reaches the hidden console as STATUS_CONTROL_C_EXIT
+# (0xC000013A), which Task Scheduler counts as failure. Three tries, a minute
+# apart: it heals without second-guessing an intentional stop.
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
+    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 
 if ($DryRun) {
     Write-Host "[DRY-RUN] would register scheduled task '$TaskName':"

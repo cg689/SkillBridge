@@ -53,7 +53,7 @@ SkillBridge：把 CC Switch 的 skills 目录同步进本机各 agent 工具的 
 - 已注册计划任务 **`SkillBridge Web UI`**：登录时以隐藏窗口启动 `web-ui.ps1 -NoBrowser`，随时可开 `http://localhost:8765/`。注册/注销：`powershell -NoProfile -ExecutionPolicy Bypass -File .\install-webui.ps1`（`-Port 9001` 换端口、`-DryRun` 预览、`-Unregister` 注销）。
 - 这只是**仪表盘常驻**，不等于自动同步：`sync-skills.ps1` 依然只手动触发，`CCSwitch Skills AutoLink` 任务保持注销、`autolink.enabled=false`（见安全红线第 2 条）。别把这两个任务混在一起，也别为了"仪表盘自启"去改 autolink。
 - 若仪表盘已手动在跑（如 `启动WebUI.bat`），自启任务启动时端口被占会退出并报错，属预期行为，不影响手动实例。
-- 无执行时限：任务不会因 72 小时默认时限被悄悄杀掉；页面上的停止按钮或 `POST /api/stop` 可随时关掉。
+- 无执行时限：任务不会因 72 小时默认时限被悄悄杀掉；已设异常退出自动重启（1 分钟后，最多 3 次）——`web-ui.ps1` 被 Ctrl+C 打断等异常死亡会自愈，而页面停止按钮/`POST /api/stop` 的干净退出码为 0，不会触发重启。
 
 ## 常用命令
 
