@@ -441,6 +441,23 @@
   .panel-foot { margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .panel-foot .sub { color: var(--text-3); font-size: 11.8px; }
 
+  /* ============================================================ scan result */
+  .scan { margin-top: 10px; padding: 14px 16px; }
+  /* Chips, not a table: the answer is a handful of tool names, and a name that
+     wraps to the next line is still readable while a column is not. */
+  .scan-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 7px; }
+  .scan-row {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+    padding: 3px 10px; border-radius: var(--r-pill);
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--text-2);
+    font-size: 12.3px; line-height: 1.5;
+  }
+  .scan-row .icon { flex: none; }
+  .scan-row b { font-weight: 660; }
+  .scan-row.ok   { color: var(--ok-text);   border-color: var(--ok-line);   background: var(--ok-soft); }
+  .scan-row.warn { color: var(--warn-text); border-color: var(--warn-line); background: var(--warn-soft); }
+  .scan-row.skip { color: var(--text-3); }
+
   .switch { display: inline-flex; align-items: center; gap: 7px; font-size: 12.3px; color: var(--text-2); cursor: pointer; user-select: none; }
   .switch input { accent-color: var(--brand); width: 14px; height: 14px; cursor: pointer; }
 
@@ -832,6 +849,7 @@
       <div class="topbar-actions">
         <span class="pill" id="pill-run" hidden><span class="dot"></span><span id="pill-run-text"></span></span>
         <button class="btn" id="btn-refresh" title="重新读取状态"><span class="icon" id="ic-refresh"></span><span class="spin" id="spin-refresh"></span>刷新</button>
+        <button class="btn" id="btn-scan" title="扫描本机已安装的 Agent 工具，把新发现的加入同步列表（不会移除任何已有目标）"><span class="icon" id="ic-scan"></span><span class="spin" id="spin-scan"></span>扫描工具</button>
         <button class="btn" id="btn-db" title="对比 CC Switch 数据库与技能文件夹（只报告，不删行）"><span class="icon" id="ic-db"></span><span class="spin" id="spin-db"></span>检查数据库</button>
         <button class="btn primary" id="btn-sync" title="立即执行一次同步"><span class="icon" id="ic-sync"></span><span class="spin" id="spin-sync"></span>立即同步</button>
         <button class="btn primary" id="btn-add-skill" title="从 .zip 压缩包安装技能到源目录" hidden>添加技能</button>
@@ -850,6 +868,22 @@
             <p class="hero-sub" id="hero-sub">&nbsp;</p>
           </div>
           <dl class="hero-kv" id="hero-kv"></dl>
+        </section>
+
+        <!-- Filled in by the first 扫描工具 press. It stays hidden until then: a
+             panel about a scan nobody ran is a placeholder, and the user asked
+             for a trigger, not a permanent display of the last detection.
+             Kept above 总览/同步目标 on purpose: the button that runs the scan
+             sits in the top bar, so the answer has to land near the top of this
+             view rather than after two dozen target cards. -->
+        <section class="card scan" id="scan-card" hidden>
+          <div class="panel-head">
+            <span class="panel-ic" id="panel-ic-scan"></span>
+            <h3>本机扫描</h3>
+            <span class="sub" id="scan-sub"></span>
+          </div>
+          <ul class="scan-list" id="scan-list"></ul>
+          <div class="panel-foot"><span class="sub" id="scan-note"></span></div>
         </section>
 
         <div class="section-head"><h2>总览</h2><span class="hint" id="overview-hint"></span></div>
@@ -1011,7 +1045,7 @@
   'use strict';
   var TOKEN = (document.querySelector('meta[name="sb-token"]') || {}).content || '';
   var $ = function (id) { return document.getElementById(id); };
-  var state = { snapshot: null, logTotal: 0, stopped: false, syncing: false };
+  var state = { snapshot: null, logTotal: 0, stopped: false, syncing: false, scanning: false };
   // Which cards the user expanded by hand. renderTargets() rebuilds the DOM on
   // every snapshot, so the open state has to live outside it — otherwise the
   // 15s poll and every finished sync collapse whatever was being read.
@@ -1851,6 +1885,66 @@
     });
   }
 
+  /* ------------------------------------------------------ scan for tools
+     The scan answers "which agent software is on this machine" and adds what it
+     finds to the sync list. It is additive on the server: nothing is ever
+     removed, and a tool named in `exclude` stays out even though its marker
+     directory is still there. */
+  function renderScan(data) {
+    var added = data.added || [], already = Number(data.already) || 0;
+    var installed = Number((data.installed || []).length) || 0;
+    var excluded = data.excluded || [], absent = data.not_installed || [];
+    var row = function (cls, ic, txt) {
+      return '<li class="scan-row ' + cls + '">' + icon(ic, 13) + '<span>' + txt + '</span></li>';
+    };
+    var list = [];
+    list.push(row('', 'Radar', '本机安装中：<b>' + num(installed) + '</b> 个 Agent 工具'));
+    if (added.length) list.push(row('ok', 'Plus', '新加入同步列表：<b>' + added.map(esc).join('、') + '</b>'));
+    list.push(row('skip', 'Check', '已在同步列表 ' + num(already) + ' 个'));
+    if (excluded.length) {
+      list.push(row('warn', 'Ban', 'exclude 排除，不加回：<b>' + excluded.map(esc).join('、') + '</b>'));
+    }
+    if (absent.length) list.push(row('skip', 'CircleSlash', '未安装：' + absent.map(esc).join('、')));
+    $('scan-list').innerHTML = list.join('');
+    $('scan-sub').textContent = data.source ? data.source : '';
+    $('scan-note').textContent = added.length
+      ? '新目标还没有任何技能，点「立即同步」把源技能链接过去。'
+      : '同步列表已覆盖本机全部已安装工具，无需改动。';
+    $('scan-card').hidden = false;
+    enterStagger(Array.prototype.slice.call($('scan-list').children), 0.02);
+    enter($('scan-card'), { duration: 0.42 });
+    // The page can be scrolled down into the target cards when the button is
+    // pressed, and a result the user has to hunt for looks like no result.
+    var card = $('scan-card').getBoundingClientRect();
+    var h = window.innerHeight || 900;
+    if (card.top < 0 || card.bottom > h) $('scan-card').scrollIntoView({ block: 'center' });
+  }
+  function runScan() {
+    if (state.scanning) return;
+    state.scanning = true;
+    Busy($('btn-scan'), true);
+    progress(true);
+    toast('info', '开始扫描', '正在按 supported-tools.json 检查本机安装目录。');
+    api('/api/scan-tools', { method: 'POST', json: { by: 'ui' }, timeout: 120000 }, function (data) {
+      state.scanning = false;
+      Busy($('btn-scan'), false);
+      progress(false);
+      if (data && data.ok) {
+        renderScan(data);
+        var added = (data.added || []).length;
+        if (added) {
+          var names = data.added.length > 4 ? (data.added.slice(0, 4).join('、') + ' 等') : data.added.join('、');
+          toast('ok', added + ' 个新工具已加入', names + ' — 点「立即同步」把技能链过去。');
+        } else {
+          toast('ok', '扫描完成', '本机 ' + (data.installed || []).length + ' 个已安装工具都已在同步列表。');
+        }
+        refresh();
+      } else {
+        toast('fail', '扫描失败', (data && data.error) || '未知错误');
+      }
+    });
+  }
+
   function runDbCheck() {
     Busy($('btn-db'), true);
     $('db-out').innerHTML = '<span class="muted">正在对比数据库与文件夹…</span>';
@@ -2045,9 +2139,10 @@
     // aria-label, so a missing name is cosmetic rather than a lost meaning.
     var at = {
       'nav-ic-sync': 'RefreshCw', 'nav-ic-skills': 'Library', 'ic-refresh': 'RefreshCw', 'ic-db': 'DatabaseZap',
+      'ic-scan': 'Radar',
       'ic-sync': 'Zap', 'ic-skills': 'BookOpen', 'ic-log': 'ScrollText', 'ic-search': 'Search',
       'ic-add-2': 'Plus', 'ic-stop': 'Power',
-      'panel-ic-db': 'Database', 'panel-ic-log': 'FileText',
+      'panel-ic-db': 'Database', 'panel-ic-log': 'FileText', 'panel-ic-scan': 'Bot',
       'add-drop-ic': 'PackagePlus', 'del-close': 'X', 'add-close': 'X',
       'skill-search-clear': 'X', 'btn-theme': 'Sun'
     };
@@ -2060,7 +2155,7 @@
       var h = $(heads[i]);
       if (h) h.innerHTML = icon(SORTICON[heads[i].slice(6)], 11);
     }
-    var spinners = ['spin-refresh', 'spin-db', 'spin-sync', 'spin-log', 'spin-skills', 'spin-stop'];
+    var spinners = ['spin-refresh', 'spin-db', 'spin-sync', 'spin-log', 'spin-skills', 'spin-stop', 'spin-scan'];
     for (var j = 0; j < spinners.length; j++) {
       var sp = $(spinners[j]);
       if (sp) sp.innerHTML = icon('LoaderCircle', 15, 'spin-ic');
@@ -2094,6 +2189,7 @@
       if (p) copyText(p);
     };
     $('btn-refresh').onclick = function () { refresh(); runLog(); };
+    $('btn-scan').onclick = runScan;
     $('btn-db').onclick = runDbCheck;
     $('btn-sync').onclick = runSync;
     $('btn-log').onclick = runLog;

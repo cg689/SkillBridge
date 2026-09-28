@@ -37,11 +37,22 @@ function Read-ConfigFile {
     param([string]$Path)
     # Safe config read: missing file or malformed JSON yields $null instead of
     # a terminating error. Callers decide how to react to $null.
-    if (-not (Test-Path $Path)) { return $null }
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $bytes = $null
+    try { $bytes = [IO.File]::ReadAllBytes($Path) } catch { return $null }
     try {
-        return Get-Content $Path -Raw | ConvertFrom-Json
+        # Get-Content decodes as ANSI under 5.1, and the config holds a
+        # hand-written $comment that is often the only machine-specific record
+        # there is. Decoding it wrong and writing it back (detect-tools.ps1
+        # rewrites the whole file) turns that record into mojibake for good, so
+        # read the bytes as what JSON is: UTF-8, minus a BOM if present.
+        $text = [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
+        return $text | ConvertFrom-Json
     } catch {
-        return $null
+        # A config hand-edited in ANSI (an old one, before this) still has to
+        # open; only the characters it holds are then read as the shell reads
+        # them, which is the behaviour this branch deliberately avoids above.
+        try { return (Get-Content $Path -Raw) | ConvertFrom-Json } catch { return $null }
     }
 }
 
@@ -1224,4 +1235,301 @@ function Get-SkillBridgeStatus {
         $snapshot.health = 'ok'
     }
     return [pscustomobject]$snapshot
+}
+
+function Find-InstalledAgentTools {
+    <#
+    .SYNOPSIS
+      Reads supported-tools.json and reports which agent tools are installed here.
+    .DESCRIPTION
+      The catalog is the single source of truth shared with detect-tools.sh, so a
+      tool only has to be described once. "Installed" means the tool's marker
+      directory exists on disk - not that it is running. A tool named in
+      $Exclude is never reported as installed, because the user removed it from
+      the sync on purpose and its marker directory outlives the uninstall.
+    .OUTPUTS
+      ok, error, tools (every catalog entry), installed, not_installed, excluded
+      (all catalog objects: Name/Marker/Skills/Mode) and unknown_exclude (names
+      the exclude list asked for that the catalog does not have).
+    #>
+    param(
+        [string]$CatalogPath = (Join-Path $PSScriptRoot 'supported-tools.json'),
+        [string[]]$Exclude = @(),
+        [switch]$All
+    )
+    $result = [pscustomobject]@{
+        ok              = $false
+        error           = ''
+        tools           = @()
+        installed       = @()
+        not_installed   = @()
+        excluded        = @()
+        unknown_exclude = @()
+    }
+    $catalog = Read-ConfigFile $CatalogPath
+    if ($null -eq $catalog -or $null -eq $catalog.tools -or @($catalog.tools).Count -lt 1) {
+        $result.error = "catalog missing or empty: $CatalogPath"
+        return $result
+    }
+
+    $tools = @()
+    foreach ($t in @($catalog.tools)) {
+        $name = [string]$t.name
+        if (-not $name) { continue }
+        $tools += [pscustomobject]@{
+            Name   = $name
+            Marker = [string]$t.marker
+            Skills = [string]$t.skills
+            Mode   = if ($t.mode) { [string]$t.mode } else { '' }
+        }
+    }
+
+    # Case-insensitive, like every name comparison in this project: the catalog
+    # and the config's `exclude` are edited by hand, by different people, at
+    # different times.
+    $excludedSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($n in @($Exclude)) { if (-not [string]::IsNullOrWhiteSpace([string]$n)) { [void]$excludedSet.Add([string]$n) } }
+    $known = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($t in $tools) { [void]$known.Add($t.Name) }
+
+    foreach ($t in $tools) {
+        if ($excludedSet.Contains($t.Name)) {
+            $result.excluded += $t
+            continue
+        }
+        # -LiteralPath: a marker is a directory name, not a wildcard, and a '['
+        # in one must not turn the check into a pattern match that never hits.
+        if ($All -or (Test-Path -LiteralPath (Expand-EnvPath $t.Marker))) {
+            $result.installed += $t
+        } else {
+            $result.not_installed += $t
+        }
+    }
+    foreach ($n in $excludedSet) {
+        if (-not $known.Contains($n)) { $result.unknown_exclude += $n }
+    }
+
+    $result.tools = $tools
+    $result.ok   = $true
+    return $result
+}
+
+function ConvertTo-SkillBridgeConfig {
+    <# The fixed-shape serializer for config.json. Shared by detect-tools.ps1
+       (which rewrites the whole file) and Merge-SkillBridgeToolTargets (which
+       only adds to it) so the two can never drift into different formats.
+       PS 5.1's ConvertTo-Json indents nested objects irregularly, so this
+       writes the file by hand. #>
+    param(
+        [string]$Comment,
+        [string]$LinkType,
+        [string]$Source,
+        # Untyped on purpose: [string[]] turns an empty @() into $null on some
+        # call paths, and this value is only ever joined back into JSON.
+        $Exclude,
+        [System.Collections.IDictionary]$Targets,
+        $Autolink,
+        [bool]$CheckDb = $false
+    )
+    $esc = { param($s) ([string]$s).Replace('\', '\\').Replace('"', '\"') }
+    $d = Get-AutolinkDefaults $Autolink
+    $enabled  = $d.enabled
+    $atLogon  = $d.at_logon
+    $interval = $d.interval_minutes
+
+    $excludeItems = @(@($Exclude) | Where-Object { $_ } | ForEach-Object { '"' + (& $esc $_) + '"' })
+    $excludeJson = '[' + ($excludeItems -join ', ') + ']'
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine('{')
+    [void]$sb.AppendLine('  "$comment": "' + (& $esc $Comment) + '",')
+    [void]$sb.AppendLine('  "link_type": "' + (& $esc $LinkType) + '",')
+    [void]$sb.AppendLine('  "source": "' + (& $esc $Source) + '",')
+    [void]$sb.AppendLine('  "exclude": ' + $excludeJson + ',')
+    [void]$sb.AppendLine('  "targets": {')
+    $names = @($Targets.Keys)
+    for ($i = 0; $i -lt $names.Count; $i++) {
+        $comma = if ($i -lt $names.Count - 1) { ',' } else { '' }
+        $val = $Targets[$names[$i]]
+        if ($val -is [hashtable] -or ($null -ne $val -and $null -ne $val.mode)) {
+            $tPath = if ($val.path) { [string]$val.path } else { [string]$val.skills }
+            $tMode = [string]$val.mode
+            $line = '    "' + (& $esc $names[$i]) + '": { "path": "'
+            $line += (& $esc $tPath) + '", "mode": "' + (& $esc $tMode) + '" }' + $comma
+        } else {
+            $line = '    "' + (& $esc $names[$i]) + '": "'
+            $line += (& $esc ([string]$val)) + '"' + $comma
+        }
+        [void]$sb.AppendLine($line)
+    }
+    [void]$sb.AppendLine('  },')
+    [void]$sb.AppendLine('  "autolink": {')
+    [void]$sb.AppendLine("    `"enabled`": $(if ($enabled) { 'true' } else { 'false' }),")
+    [void]$sb.AppendLine("    `"at_logon`": $(if ($atLogon) { 'true' } else { 'false' }),")
+    [void]$sb.AppendLine("    `"interval_minutes`": $interval")
+    [void]$sb.AppendLine('  },')
+    [void]$sb.AppendLine("  `"check_db`": $(if ($CheckDb) { 'true' } else { 'false' })")
+    [void]$sb.AppendLine('}')
+    return $sb.ToString()
+}
+
+function Merge-SkillBridgeToolTargets {
+    <#
+    .SYNOPSIS
+      Scans this machine for installed agent tools and adds the ones the config
+      is missing to its `targets`, then writes config.json back.
+    .DESCRIPTION
+      Additive by design, and deliberately unlike detect-tools.ps1 (which
+      rewrites the whole file from the catalog and therefore drops targets whose
+      marker directory is gone):
+
+        * only names are added - every existing target keeps its path and mode
+        * source / link_type / exclude / autolink / check_db / $comment are
+          written back exactly as they were read
+        * a tool named in `exclude` is never added, because that list is a
+          deliberate opt-out and its marker directory outlives the uninstall
+        * nothing is written at all when there is nothing to add
+        * if the rewritten file does not parse, or loses a target it had, the
+          original bytes are restored and the caller gets ok=$false
+
+      This is what the dashboard's scan button calls: it answers "which agent
+      software is installed on this machine" and puts the missing ones into the
+      sync list without changing anything the user configured.
+    #>
+    param(
+        [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json'),
+        [string]$CatalogPath = (Join-Path $PSScriptRoot 'supported-tools.json')
+    )
+    $result = [pscustomobject]@{
+        ok              = $false
+        error           = ''
+        wrote           = $false
+        added           = @()
+        already         = 0
+        installed       = @()
+        not_installed   = @()
+        excluded        = @()
+        unknown_exclude = @()
+        targets_total   = 0
+        source          = ''
+    }
+
+    if (-not (Test-Path -LiteralPath $ConfigPath)) {
+        $result.error = "config not found: $ConfigPath"
+        return $result
+    }
+    # The restore source. Written only after the rewrite has been re-read and
+    # checked, never "the run succeeded" as a trust fallback.
+    $beforeText = [IO.File]::ReadAllText($ConfigPath)
+    $existing = Read-ConfigFile $ConfigPath
+    if ($null -eq $existing) {
+        $result.error = "could not parse config: $ConfigPath"
+        return $result
+    }
+    # No source means the config is not usable yet; detect-tools.ps1 fills in a
+    # default guess, but a scan that changes where the skills are read from is
+    # not what the operator pressed the button for.
+    if ([string]::IsNullOrWhiteSpace([string]$existing.source)) {
+        $result.error = 'config.json has no "source": set one before scanning'
+        return $result
+    }
+
+    $excludeList = @()
+    if ($existing.exclude) { foreach ($n in @($existing.exclude)) { if ($n) { $excludeList += [string]$n } } }
+    $scan = Find-InstalledAgentTools -CatalogPath $CatalogPath -Exclude $excludeList
+    if (-not $scan.ok) {
+        $result.error = $scan.error
+        return $result
+    }
+
+    # ConvertFrom-Json can hand back one property whose Name is $null for an
+    # empty `targets` block, and an OrderedDictionary refuses a $null key.
+    $existingNames = @()
+    if ($existing.targets) { $existingNames = @($existing.targets.PSObject.Properties.Name | Where-Object { $_ }) }
+    $have = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($n in $existingNames) { [void]$have.Add([string]$n) }
+
+    $result.installed       = @($scan.installed       | ForEach-Object { $_.Name })
+    $result.not_installed   = @($scan.not_installed   | ForEach-Object { $_.Name })
+    $result.excluded        = @($scan.excluded        | ForEach-Object { $_.Name })
+    $result.unknown_exclude = @($scan.unknown_exclude)
+    $result.already         = $existingNames.Count
+    $result.source          = ([string](Expand-EnvPath ([string]$existing.source))).Trim()
+
+    $newTools = @($scan.installed | Where-Object { -not $have.Contains($_.Name) })
+    if ($newTools.Count -eq 0) {
+        # Nothing to change, so nothing is written: a scan must not rewrite the
+        # operator's hand-edited comment or reorder their targets for nothing.
+        $result.ok = $true
+        return $result
+    }
+
+    # Carry every existing target across unchanged - string and {path,mode}
+    # entries alike - then append what the scan found, in catalog order.
+    $merged = [ordered]@{}
+    if ($existing.targets) {
+        foreach ($p in $existing.targets.PSObject.Properties) {
+            $val = $p.Value
+            if ($null -eq $val) { continue }
+            if ($val -is [string]) {
+                $merged[$p.Name] = [string]$val
+            } elseif ($null -ne $val.mode) {
+                $tPath = if ($null -ne $val.path) { [string]$val.path } else { [string]$val.skills }
+                $merged[$p.Name] = @{ path = $tPath; mode = [string]$val.mode }
+            } else {
+                $merged[$p.Name] = [string](if ($null -ne $val.path) { $val.path } elseif ($null -ne $val.skills) { $val.skills } else { $val })
+            }
+        }
+    }
+    foreach ($t in $newTools) {
+        if ($t.Mode) {
+            $merged[$t.Name] = @{ path = $t.Skills; mode = $t.Mode }
+        } else {
+            $merged[$t.Name] = $t.Skills
+        }
+    }
+
+    $mComment = if ($existing.'$comment') {
+        [string]$existing.'$comment'
+    } else {
+        'SkillBridge - auto-generated by detect-tools.ps1 for THIS machine.'
+    }
+    $mLinkType = if ($existing.link_type) { [string]$existing.link_type } else { 'junction' }
+    $mCheckDb  = if ($null -ne $existing.check_db) { [bool]$existing.check_db } else { $false }
+    $json = ConvertTo-SkillBridgeConfig `
+        -Comment  $mComment `
+        -LinkType $mLinkType `
+        -Source   ([string]$existing.source) `
+        -Exclude  $excludeList `
+        -Targets  $merged `
+        -Autolink $existing.autolink `
+        -CheckDb  $mCheckDb
+    [System.IO.File]::WriteAllText($ConfigPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+
+    # Re-read what was actually written. A half-written config would turn the
+    # next sync into a silent no-op against an empty target list, so a rewrite
+    # that cannot be proven to have kept everything is rolled back instead.
+    $verify = Read-ConfigFile $ConfigPath
+    $problem = ''
+    if ($null -eq $verify) {
+        $problem = 'the rewritten config.json does not parse'
+    } else {
+        foreach ($n in $existingNames) {
+            if (-not $verify.targets -or -not $verify.targets.PSObject.Properties[$n]) {
+                $problem = "target '$n' is gone from the rewritten config.json"
+                break
+            }
+        }
+    }
+    if ($problem) {
+        [IO.File]::WriteAllText($ConfigPath, $beforeText, (New-Object System.Text.UTF8Encoding($false)))
+        $result.error = "$problem - config.json restored to what it was"
+        return $result
+    }
+
+    $result.ok            = $true
+    $result.wrote         = $true
+    $result.added         = @($newTools | ForEach-Object { $_.Name })
+    $result.targets_total = $merged.Count
+    return $result
 }

@@ -11,6 +11,8 @@
 #   POST /api/sync      run sync-skills.ps1 and return its output
 #   GET  /api/log       the tail of sync-skills.log
 #   POST /api/db-check  compare the skills folder with cc-switch.db (report only)
+#   POST /api/scan-tools  find the agent tools installed here and add the
+#                         missing ones to config.json's targets (additive)
 #   POST /api/skills/delete   remove one skill folder from the source
 #   POST /api/skills/add      install the skills inside an uploaded .zip
 #   POST /api/stop      shut the server down
@@ -428,6 +430,29 @@ function Handle-Request {
             }
             Write-ServerLine 'database check requested' 'Cyan'
             Send-Json -Context $req -Value (Invoke-DbCheck)
+            return
+        }
+        '^/api/scan-tools$' {
+            if ($req.method -ne 'POST') {
+                Send-Json -Context $req -Code 405 -Value @{ error = 'POST only' }
+                return
+            }
+            # Same catalog and marker checks detect-tools.ps1 runs, but additive:
+            # the answer to "which agent software is installed here" must not
+            # cost the user a target whose marker directory is merely absent, nor
+            # re-add one that `exclude` removed on purpose.
+            Write-ServerLine 'tool scan requested' 'Cyan'
+            $result = Merge-SkillBridgeToolTargets -ConfigPath $ConfigPath
+            if ($result.ok) {
+                if ($result.wrote) {
+                    Write-ServerLine ('tool scan added: ' + (@($result.added) -join ', ')) 'Green'
+                } else {
+                    Write-ServerLine 'tool scan: every installed tool is already a target' 'Gray'
+                }
+            } else {
+                Write-ServerLine ("tool scan failed: $($result.error)") 'Red'
+            }
+            Send-Json -Context $req -Value $result
             return
         }
         '^/api/stop$' {

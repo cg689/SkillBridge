@@ -45,7 +45,9 @@ describing the use case and the expected behavior.
    `marker`, `skills`, optional `mode`). Prefer environment variables over
    hardcoded paths. Use `"mode": "copy"` when the tool cannot follow
    junctions/symlinks (Cursor Cloud Agents are the example). This file is the
-   source of truth: `detect-tools.ps1` and `detect-tools.sh` both read it.
+   source of truth: `detect-tools.ps1` and `detect-tools.sh` both read it, and so
+   does the dashboard's 扫描工具 button (`Find-InstalledAgentTools` in
+   `common.psm1`), so a new tool shows up in the page without any page work.
 3. Add the same `name → skills` line to `config.example.json` (CI fails if the
    two lists drift).
 4. Update `支持的软件列表.md` and the supported-tools mention in `README.md` /

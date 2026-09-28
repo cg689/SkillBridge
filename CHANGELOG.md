@@ -184,6 +184,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool names in the Unix log, and `check-db-sync.py` (temp SQLite DB).
 - CI: the Windows smoke suite also runs under Windows PowerShell 5.1 (the shell
   the .bat launchers and the scheduled task actually use), not just pwsh 7.
+- **A 扫描工具 button on the dashboard: scan this machine for installed agent
+  software and add what is missing to the sync list.** `POST /api/scan-tools`
+  runs the same catalog check `detect-tools` runs — `Find-InstalledAgentTools`
+  reads `supported-tools.json` and tests each tool's marker directory on disk —
+  and then merges the result into `config.json` through the new
+  `Merge-SkillBridgeToolTargets`, both in `common.psm1`.
+  - **The scan only adds.** `detect-tools.ps1`/`.sh` rewrite the whole
+    `targets` block, which drops any target whose marker directory has gone
+    missing; that is the right behaviour for a script whose job is to rebuild the
+    list, and the wrong behaviour for a button the operator presses to say "add
+    the new tools". So the button takes the other path: existing targets keep
+    their paths and modes byte for byte, and only new names are appended.
+  - A tool named in `exclude` is never added, even when its marker directory is
+    still on disk — an uninstall usually leaves that directory behind, which is
+    the whole reason `exclude` exists. Nothing is written at all when there is
+    nothing to add, and if the rewritten file does not parse back, or loses a
+    target it had, the original bytes are restored and the route reports the
+    failure instead of leaving a half-written config.
+  - The page answers with a result card near the button that triggered it: how
+    many tools are installed, which names were added, how many were already
+    there, what `exclude` is holding back and what is not installed at all —
+    then refreshes the target grid so the new targets are visible immediately.
+  - `common.psm1` now owns the shared pieces (`Read-ConfigFile`,
+    `ConvertTo-SkillBridgeConfig`, `Find-InstalledAgentTools`,
+    `Merge-SkillBridgeToolTargets`) instead of `detect-tools.ps1` owning a private
+    copy, so the two paths can never drift into two config formats.
+    `detect-tools.ps1` gained `-ConfigPath` (and `detect-tools.sh` `--config
+    PATH`) so it can be aimed at another config without moving the real one.
 
 ### Removed
 - **Dead code in the dashboard page**, most of it left over from the rebuild:
@@ -247,6 +275,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the file itself.
 
 ### Fixed
+- **`Read-ConfigFile` read `config.json` as ANSI, not UTF-8.** PowerShell 5.1's
+  `Get-Content -Raw` decodes with the machine's code page unless the file carries
+  a BOM, and `config.json` is written without one — with a hand-written
+  `$comment` in it. Every read of the config mangled that comment
+  (`同步CCSwitch技能.bat` → `鍚屾��CCSwitch鎶€鑳�.bat`) and every writer that
+  round-tripped through it made the damage permanent. The bytes are read and
+  decoded as UTF-8 now (BOM stripped if present), with the ANSI read only as a
+  fallback for a file that really is not UTF-8. This is the shared reader every
+  script and the dashboard use, so it was one bug with many symptoms.
 - **Every `/assets/` request answered 500.** `$script:StaticFiles` is an
   `[ordered]@{}`, i.e. an `OrderedDictionary`, which has `Contains` — not
   `ContainsKey` (that is the hashtable spelling). The call threw on the first

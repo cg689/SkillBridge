@@ -412,6 +412,21 @@ try {
         throw 'FAIL: renderSourceCard is not called on the status snapshot, so the sidebar source card stays on its placeholder'
     }
 
+    # The scan button: the page must both offer it and call the route that runs
+    # the detection. A button with no handler is the failure mode here (it looks
+    # like the feature is there and nothing happens).
+    if ($page.text -notmatch 'id="btn-scan"' -or $page.text -notmatch 'id="scan-card"' -or $page.text -notmatch 'id="scan-list"') {
+        throw 'FAIL: the tool scan button / result card is missing from the page'
+    }
+    if ($page.text -notmatch "api/scan-tools" -or $page.text -notmatch 'function runScan' -or $page.text -notmatch "btn-scan'\).onclick = runScan") {
+        throw 'FAIL: the 扫描工具 button is not wired to POST /api/scan-tools'
+    }
+    # ... and the answer has to land near the button, not below the target grid:
+    # a result card buried under two dozen targets reads as "nothing happened".
+    if ($page.text.IndexOf('id="scan-card"') -gt $page.text.IndexOf('id="targets"')) {
+        throw 'FAIL: the scan result card sits below the 同步目标 grid instead of near the 扫描工具 button'
+    }
+
     # -- no token, no API -----------------------------------------------------
     foreach ($m in @(
         @{ m = 'GET';  p = 'api/status' },
@@ -420,6 +435,7 @@ try {
         @{ m = 'GET';  p = 'api/sync' },
         @{ m = 'POST'; p = 'api/sync'; b = '{}' },
         @{ m = 'POST'; p = 'api/db-check'; b = '{}' },
+        @{ m = 'POST'; p = 'api/scan-tools'; b = '{}' },
         @{ m = 'POST'; p = 'api/stop'; b = '{}' }
     )) {
         $r = Invoke-Api -Method $m.m -Path $m.p -Body $m.b
@@ -442,6 +458,10 @@ try {
     $badMethod2 = Invoke-Api -Method 'GET' -Path 'api/db-check' -Token $Token
     if ($badMethod2.code -ne 405) {
         throw "FAIL: GET /api/db-check returned HTTP $($badMethod2.code) (expected 405 - it runs a check)"
+    }
+    $badMethod3 = Invoke-Api -Method 'GET' -Path 'api/scan-tools' -Token $Token
+    if ($badMethod3.code -ne 405) {
+        throw "FAIL: GET /api/scan-tools returned HTTP $($badMethod3.code) (expected 405 - it scans the machine)"
     }
     $unknown = Invoke-Api -Method 'GET' -Path 'api/nope' -Token $Token
     if ($unknown.code -ne 404) {
@@ -876,6 +896,98 @@ try {
             throw 'FAIL: the dashboard db-check MODIFIED cc-switch.db (it must stay report-only)'
         }
     }
+
+    # -- the tool scan adds, and only adds -----------------------------------
+    # The button answers "which agent software is installed on this machine".
+    # The fixture config holds two custom targets and no catalog target, so the
+    # scan has to add every installed catalog tool - while the two named in
+    # `exclude` stay out even though their marker directories are on disk, and
+    # nothing the user configured moves underneath. (That is the Codex / Doubao
+    # rule, tested against whichever tools happen to be installed here.)
+    $scanProbe = Find-InstalledAgentTools
+    if (-not $scanProbe.ok) { throw "FAIL: the tool catalog cannot be read: $($scanProbe.error)" }
+    # Two of the installed ones are named in `exclude` below, so a machine with
+    # only two would leave nothing to add and the assertions become vacuous.
+    if (@($scanProbe.installed).Count -lt 3) {
+        throw "FAIL: only $(@($scanProbe.installed).Count) installed tool(s) here - the scan assertions below would be vacuous"
+    }
+    $optOut = @($scanProbe.installed | Select-Object -First 2 | ForEach-Object { $_.Name })
+
+    # Written as bytes with a hand-made comment that contains UTF-8, because a
+    # scan reads the config back before rewriting it and an ANSI read turns that
+    # comment into mojibake for good.
+    $scanJson = ConvertTo-SkillBridgeConfig `
+        -Comment '扫描夹具注释 - scan fixture note' `
+        -LinkType 'junction' `
+        -Source (Join-Path $tmp 'src') `
+        -Exclude $optOut `
+        -Targets ([ordered]@{
+            WebUi     = (Join-Path $tmp 'tgt')
+            WebUiCopy = @{ path = (Join-Path $tmp 'tgt-copy'); mode = 'copy' }
+        }) `
+        -Autolink @{ enabled = $false; at_logon = $true; interval_minutes = 0 } `
+        -CheckDb $true
+    [System.IO.File]::WriteAllText($cfgPath, $scanJson, (New-Object System.Text.UTF8Encoding($false)))
+
+    # The dashboard runs against this config and must write nothing else: the
+    # repo's own config.json is the operator's file, and a route that writes it
+    # would silently rewrite their real target list.
+    $repoCfg = Join-Path $root 'config.json'
+    $repoBefore = if (Test-Path -LiteralPath $repoCfg) { [IO.File]::ReadAllBytes($repoCfg) } else { $null }
+
+    $scan = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/scan-tools' -Token $Token -Body '{}') 'POST /api/scan-tools'
+    if (-not $scan.ok) { throw "FAIL: the tool scan failed: $($scan.error)" }
+    if (-not $scan.wrote) { throw 'FAIL: the scan reported nothing to add on a config with no catalog target' }
+    $scanAfter = Read-ConfigFile $cfgPath
+    if ($null -eq $scanAfter) { throw "FAIL: the scan left config.json unreadable: $cfgPath" }
+    $namesAfter = @($scanAfter.targets.PSObject.Properties.Name | Where-Object { $_ })
+    if ($namesAfter -notcontains 'WebUi') { throw "FAIL: the scan dropped the custom target WebUi: $($namesAfter -join ', ')" }
+    if ($scanAfter.targets.WebUi -ne (Join-Path $tmp 'tgt')) { throw 'FAIL: the scan changed the path of a target it did not touch' }
+    if ($scanAfter.targets.WebUiCopy.mode -ne 'copy') { throw "FAIL: the scan changed a copy target's mode: $($scanAfter.targets.WebUiCopy.mode)" }
+
+    # Every name it added has to be a real catalog tool, and it has to be in the
+    # file afterwards - a reported add that is not written is the silent kind.
+    $catalogNames = @($scanProbe.tools | ForEach-Object { $_.Name })
+    foreach ($n in @($scan.added)) {
+        if ($catalogNames -notcontains $n) { throw "FAIL: the scan added '$n', which is not in supported-tools.json" }
+        if ($namesAfter -notcontains $n) { throw "FAIL: the scan reported adding '$n' but config.json does not contain it" }
+    }
+    if (@($scan.added).Count -lt 1) { throw 'FAIL: the scan wrote the file but reported no added tool' }
+    foreach ($n in $optOut) {
+        if ($namesAfter -contains $n) { throw "FAIL: the scan re-added '$n', which config exclude removes on purpose" }
+    }
+    if ($scanAfter.source -ne (Join-Path $tmp 'src')) { throw "FAIL: the scan changed source: $($scanAfter.source)" }
+    if ($scanAfter.check_db -ne $true) { throw 'FAIL: the scan changed check_db' }
+    if ($scanAfter.autolink.enabled -ne $false) { throw 'FAIL: the scan changed autolink' }
+    if ($scanAfter.exclude -join ',' -ne ($optOut -join ',')) { throw "FAIL: the scan rewrote exclude: $($scanAfter.exclude -join ',')" }
+    if ($scanAfter.'$comment' -notmatch '扫描夹具注释') {
+        throw ('FAIL: the UTF-8 $comment entry did not survive the scan: ' + $scanAfter.'$comment')
+    }
+    if (@($scan.installed).Count -lt 1) { throw 'FAIL: the scan payload reports no installed tool at all' }
+
+    # A second scan has nothing left to add, and must not rewrite the file at
+    # all: a scan that reorders the operator's config for nothing is noise.
+    $bytesBefore = [IO.File]::ReadAllBytes($cfgPath)
+    $scan2 = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/scan-tools' -Token $Token -Body '{}') 'POST /api/scan-tools (second)'
+    if (-not $scan2.ok) { throw "FAIL: the second scan failed: $($scan2.error)" }
+    if ($scan2.wrote) { throw "FAIL: the second scan rewrote config.json with nothing to add: $($scan2.added -join ', ')" }
+    if (@($scan2.added).Count -ne 0) { throw "FAIL: the second scan reported a change it did not write: $($scan2.added -join ', ')" }
+    $bytesAfter = [IO.File]::ReadAllBytes($cfgPath)
+    if ($bytesAfter.Length -ne $bytesBefore.Length) { throw 'FAIL: the second scan changed the size of config.json' }
+    for ($i = 0; $i -lt $bytesBefore.Length; $i++) {
+        if ($bytesAfter[$i] -ne $bytesBefore[$i]) { throw "FAIL: the second scan rewrote config.json at byte $i" }
+    }
+
+    if ($null -ne $repoBefore) {
+        $repoAfter = [IO.File]::ReadAllBytes($repoCfg)
+        if ($repoAfter.Length -ne $repoBefore.Length) {
+            throw "FAIL: the scan wrote the repo's own config.json ($($repoCfg))"
+        }
+        for ($i = 0; $i -lt $repoBefore.Length; $i++) {
+            if ($repoAfter[$i] -ne $repoBefore[$i]) { throw "FAIL: the scan modified the repo's config.json at byte $i" }
+        }
+    }
+    Write-Host 'OK: the tool scan adds installed tools, honours exclude, rewrites nothing else'
 
     # -- loopback only --------------------------------------------------------
     # 0.0.0.0 here would publish the dashboard to the whole network, which is

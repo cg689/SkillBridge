@@ -7,8 +7,9 @@
 # %VAR% form so the same file works on any machine.
 #
 # Usage:
-#   ./detect-tools.sh           # only tools whose marker dir exists
-#   ./detect-tools.sh --all     # include every supported tool
+#   ./detect-tools.sh                          # only tools whose marker dir exists
+#   ./detect-tools.sh --all                    # include every supported tool
+#   ./detect-tools.sh --config /path/config.json   # write somewhere else
 #
 # Tools listed in the config's `exclude` array are never written to `targets`,
 # even with --all — that is how a deliberately removed target stays removed.
@@ -22,8 +23,17 @@ ALL=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --all|-All|-all) ALL=1; shift ;;
+        --config)
+            # Guard the value: `shift 2` with only one argument left fails silently
+            # and leaves $1 unchanged, so the loop would spin forever with no output.
+            if [ $# -lt 2 ] || [ -z "$2" ]; then
+                echo "[ERROR] --config needs a path" >&2
+                exit 1
+            fi
+            CONFIG="$2"; shift 2
+            ;;
         -h|--help)
-            echo "Usage: $0 [--all]"
+            echo "Usage: $0 [--all] [--config PATH]"
             exit 0
             ;;
         *) echo "unknown option: $1" >&2; exit 1 ;;
