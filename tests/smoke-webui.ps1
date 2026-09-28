@@ -39,6 +39,11 @@
 #     an illegal name, a folder that is not there, and a folder without SKILL.md
 #     — and leaves the targets holding the link, which shows up as a residual the
 #     next sync prunes
+#   * POST /api/skills/delete-many does the same for several names at once: a
+#     body that is not a non-empty array is a 400, over the size ceiling it is
+#     refused whole, a name that does not exist (or is not a skill, or is
+#     illegal) is refused per entry without taking the valid ones down with it,
+#     and a batch that partly went through reports which names still stand
 #   * POST /api/db-check is report-only: cc-switch.db is byte-identical after it,
 #     even when the check finds drift
 #   * the listener is bound to loopback only, never 0.0.0.0
@@ -397,6 +402,43 @@ try {
     }
     if ($page.text -notmatch 'data-del=' -or $page.text -notmatch 'row-del') {
         throw 'FAIL: the skill rows have no delete action any more'
+    }
+    # Multi-select: every row carries its own tick box, the header one means
+    # "what I can see", and the batch actions only exist once something is
+    # ticked. Without all of them the feature is a promise the page cannot keep.
+    if ($page.text -notmatch 'data-check=' -or $page.text -notmatch 'row-check') {
+        throw 'FAIL: the skill rows have no tick box, so nothing can be selected in bulk'
+    }
+    if ($page.text -notmatch 'id="skills-check-all"' -or $page.text -notmatch 'id="skills-selbar"' -or
+        $page.text -notmatch 'id="sel-delete"') {
+        throw 'FAIL: the batch action bar (header box / selbar / delete-selected) is missing from the page'
+    }
+    if ($page.text -notmatch 'id="del-names"') {
+        throw 'FAIL: the delete dialog cannot list the names a batch delete is about to remove'
+    }
+    if ($page.text -notmatch 'delete-many') {
+        throw 'FAIL: the page never calls the batch delete route'
+    }
+    # The grid gained a track for the tick boxes, so the header, the rows and
+    # the responsive variant all have to agree on it - a column that only one
+    # of them declares shifts every cell under a checkbox that is not there.
+    if ($page.text -notmatch '--cols:\s*26px minmax\(150px') {
+        throw 'FAIL: the skills grid does not open with a 26px track for the tick boxes'
+    }
+    if ($page.text -notmatch '--cols:\s*26px minmax\(120px') {
+        throw 'FAIL: the responsive skills grid does not open with the tick-box track'
+    }
+    # The tick box is the row's first cell, or it will not line up with the
+    # header's box.
+    $rowSrc = [regex]::Match($page.text, 'function skillRow\(s\) \{[\s\S]*?\n  \}').Value
+    if ($rowSrc -notmatch 'cell-sel[\s\S]*cell-name' -or $rowSrc.IndexOf('cell-sel') -gt $rowSrc.IndexOf('cell-name')) {
+        throw 'FAIL: the tick box is not the first cell of a skill row'
+    }
+    # A tick must not also open the row's detail: the click handler has to look
+    # for the box BEFORE it looks for the row, or every click toggles both.
+    $handlerSrc = [regex]::Match($page.text, "list\.addEventListener\('click'[\s\S]*?\n    \}\);").Value
+    if ($handlerSrc -notmatch 'data-check' -or $handlerSrc.IndexOf('data-check') -gt $handlerSrc.IndexOf('skill-group-head')) {
+        throw 'FAIL: the row click handler can open a detail on a tick-box click (data-check is not checked first)'
     }
     # Keyboard users get a visible ring; the rest of the page relies on it.
     if ($page.text -notmatch ':focus-visible') {
@@ -878,6 +920,110 @@ try {
     if (Test-Path -LiteralPath (Join-Path $tmp 'tgt-copy\demo-skill')) {
         throw 'FAIL: the sync did not remove the copy of the deleted skill (it carries our marker, so it is ours)'
     }
+
+    # -- deleting several at once ---------------------------------------------
+    # Same guards as the single delete, one name at a time: a batch that names a
+    # skill that does not exist (or a folder that is not a skill) must not take
+    # the valid entries down with it, and must not quietly delete the ones it
+    # refused to look at.
+    foreach ($n in 'batch-a', 'batch-b', 'batch-c', 'batch-d') {
+        New-Item -ItemType Directory -Path (Join-Path $tmp "src\$n") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $tmp "src\$n\SKILL.md"),
+            "---`nname: $n`ndescription: >-`n  批量删除夹具。`n---`n# $n`n", (New-Object System.Text.UTF8Encoding($false)))
+        [System.IO.File]::WriteAllText((Join-Path $tmp "src\$n\notes.md"), "body of $n", (New-Object System.Text.UTF8Encoding($false)))
+    }
+    # A folder with no SKILL.md is not a skill, and the batch must refuse it for
+    # the same reason the single delete does.
+    New-Item -ItemType Directory -Path (Join-Path $tmp 'src\batch-notaskill') -Force | Out-Null
+    $syBatch = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/sync' -Token $Token -Body '{}') 'POST /api/sync before the batch'
+    if ($syBatch.ok -ne $true) { throw "FAIL: the sync of the batch fixtures failed: $($syBatch.output)" }
+
+    $batchGet = Invoke-Api -Method 'GET' -Path 'api/skills/delete-many' -Token $Token
+    if ($batchGet.code -ne 405) {
+        throw "FAIL: GET /api/skills/delete-many returned HTTP $($batchGet.code) (expected 405)"
+    }
+    $batchNoTok = Invoke-Api -Method 'POST' -Path 'api/skills/delete-many' -Body '{"names":["batch-a"]}'
+    if ($batchNoTok.code -ne 403) {
+        throw "FAIL: POST /api/skills/delete-many without X-SB-Token returned HTTP $($batchNoTok.code) (expected 403)"
+    }
+    # A string where an array belongs is a 400, not a one-skill batch: the route
+    # is explicit about what it takes, so a client mistake cannot pass as intent.
+    foreach ($body in '{}', '{"names":[]}', '{"names":"batch-a"}', '{"names":["  ",""]}', 'not json') {
+        $r = Invoke-Api -Method 'POST' -Path 'api/skills/delete-many' -Token $Token -Body $body
+        if ($r.code -ne 400) {
+            throw "FAIL: POST /api/skills/delete-many with body '$body' returned HTTP $($r.code) (expected 400)"
+        }
+    }
+    # The size ceiling comes before anything is touched: asking for more skills
+    # than the library can plausibly mean is refused whole, not in part.
+    $huge = @()
+    for ($i = 0; $i -lt 201; $i++) { $huge += "flood-$i" }
+    $over = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/skills/delete-many' -Token $Token -Body (@{ names = $huge } | ConvertTo-Json -Compress)) 'POST /api/skills/delete-many (over the limit)'
+    if ($over.ok -ne $false -or $over.error -notmatch 'too many at once') {
+        throw "FAIL: 201 names were not refused as a batch: ok=$($over.ok) error=$($over.error)"
+    }
+    if (@($over.deleted).Count -ne 0 -or @($over.failed).Count -ne 0) {
+        throw 'FAIL: the refused over-limit batch reports entries it never looked at'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $tmp 'src\batch-a'))) {
+        throw 'FAIL: the over-limit refusal touched the skills folder'
+    }
+
+    # Partial: one name that is there, one that is not. The valid one goes, the
+    # invalid one is reported, and the run says so instead of answering "ok".
+    $partial = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/skills/delete-many' -Token $Token -Body '{"names":["batch-a","no-such-skill"]}') 'POST /api/skills/delete-many (one missing)'
+    if ($partial.ok -ne $false -or $partial.error -notmatch 'deleted 1, refused 1') {
+        throw "FAIL: the partial batch did not report what it did: ok=$($partial.ok) error=$($partial.error)"
+    }
+    if (@($partial.deleted).Count -ne 1 -or @($partial.deleted)[0].name -ne 'batch-a' -or @($partial.deleted)[0].files -lt 1) {
+        throw "FAIL: the partial batch did not report the entry it deleted: $($partial | ConvertTo-Json -Compress)"
+    }
+    if (@($partial.failed).Count -ne 1 -or @($partial.failed)[0].name -ne 'no-such-skill') {
+        throw "FAIL: the partial batch did not name the refused entry: $($partial | ConvertTo-Json -Compress)"
+    }
+    if (Test-Path -LiteralPath (Join-Path $tmp 'src\batch-a')) {
+        throw 'FAIL: batch-a survived a batch that reported deleting it'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $tmp 'src\batch-b'))) {
+        throw 'FAIL: the partial batch deleted batch-b, which it was never asked about'
+    }
+    # A non-skill folder and an illegal name in the same request: both refused,
+    # neither deleted, and the folder is still there afterwards.
+    $refuse = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/skills/delete-many' -Token $Token -Body '{"names":["batch-b","..","batch-notaskill"]}') 'POST /api/skills/delete-many (mixed)'
+    if ($refuse.ok -ne $false -or @($refuse.deleted).Count -ne 1 -or @($refuse.deleted)[0].name -ne 'batch-b') {
+        throw "FAIL: the batch did not delete the one valid entry among refusals: $($refuse | ConvertTo-Json -Compress)"
+    }
+    if (@($refuse.failed).Count -ne 2) {
+        throw "FAIL: the batch did not refuse exactly the illegal name and the non-skill folder: $($refuse | ConvertTo-Json -Compress)"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $tmp 'src\batch-notaskill'))) {
+        throw 'FAIL: a folder without SKILL.md was deleted by a batch that had to refuse it'
+    }
+    # A batch of all-valid names: clean answer, and the orphans it leaves behind
+    # are the next sync's to prune.
+    $stBefore = Get-JsonResult (Invoke-Api -Method 'GET' -Path 'api/status' -Token $Token) 'GET /api/status before the clean batch'
+    $clean = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/skills/delete-many' -Token $Token -Body '{"names":["batch-c","batch-d"]}') 'POST /api/skills/delete-many (clean)'
+    if ($clean.ok -ne $true -or @($clean.failed).Count -ne 0) {
+        throw "FAIL: the clean batch was not clean: ok=$($clean.ok) error=$($clean.error)"
+    }
+    if (@($clean.deleted).Count -ne 2 -or $clean.files -lt 2 -or $clean.size -le 0) {
+        throw "FAIL: the clean batch did not report its totals: $($clean | ConvertTo-Json -Compress)"
+    }
+    foreach ($n in 'batch-c', 'batch-d') {
+        if (Test-Path -LiteralPath (Join-Path $tmp "src\$n")) { throw "FAIL: $n survived a clean batch that reported deleting it" }
+    }
+    if (@($stBefore.targets | Where-Object { $_.mode -ne 'copy' })[0].orphans.Count -lt 1) {
+        throw 'FAIL: a deleted skill left no residual behind, so there is nothing for the next sync to prune'
+    }
+    $st5b = Get-JsonResult (Invoke-Api -Method 'GET' -Path 'api/status' -Token $Token) 'GET /api/status after the clean batch'
+    if ($st5b.skill_count -ne ($stBefore.skill_count - 2)) {
+        throw "FAIL: after the clean batch the snapshot reports skill_count=$($st5b.skill_count) (expected $($stBefore.skill_count - 2))"
+    }
+    $sy3 = Get-JsonResult (Invoke-Api -Method 'POST' -Path 'api/sync' -Token $Token -Body '{}') 'POST /api/sync after the clean batch'
+    if ($sy3.ok -ne $true) { throw "FAIL: the sync after the clean batch failed: $($sy3.output)" }
+    if (Test-Path -LiteralPath (Join-Path $tmp 'tgt\batch-c')) {
+        throw 'FAIL: the sync did not prune the residual left by the clean batch'
+    }
     # The two added skills made it into every target, which proves the import
     # installed something a sync can actually link.
     $st4 = Get-JsonResult (Invoke-Api -Method 'GET' -Path 'api/status' -Token $Token) 'GET /api/status after the second sync'
@@ -1132,7 +1278,13 @@ try {
     if ($srvOut -notmatch 'delete refused \(\.\.\)') {
         throw "FAIL: the server did not log the refused delete attempt: $srvOut"
     }
-    Write-Host 'OK: web-ui smoke (page+token, 403 gate, 405/404, add/delete round trip, zip-slip, snapshot, skill browser, log tail, driven sync, report-only db-check, loopback bind, clean stop)'
+    if ($srvOut -notmatch 'delete requested: 2 skills' -or $srvOut -notmatch 'deleted 2 skills') {
+        throw "FAIL: the server did not log the driven batch delete: $srvOut"
+    }
+    if ($srvOut -notmatch 'batch delete not clean' -or $srvOut -notmatch 'refused \(no-such-skill\)') {
+        throw "FAIL: the server did not log the partial batch as not clean: $srvOut"
+    }
+    Write-Host 'OK: web-ui smoke (page+token, 403 gate, 405/404, add/delete round trip, batch delete, zip-slip, snapshot, skill browser, log tail, driven sync, report-only db-check, loopback bind, clean stop)'
 } finally {
     if ($proc -and -not $proc.HasExited) {
         try { $proc.Kill() } catch { }

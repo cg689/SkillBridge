@@ -20,6 +20,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list, a traversal, `config.json`, a path that does not resolve and a directory
   are all 404; every answer is `no-store`. If a file is missing the page
   degrades quietly instead of half-rendering.
+- **Multi-select delete in the skill browser.** Every row in 技能库 carries a
+  tick box (the header's means "what I can currently see", not "every row there
+  is"), and ticking anything opens a batch bar: how many are selected, how many
+  files and roughly how much space they add up to, 反选 / 取消选择, and 删除所选.
+  The delete dialog is the same one as before — it can now also hold several
+  names, which it lists in full with the totals beside the list, because an
+  irreversible delete has to be checkable against the table before the button is
+  pressed, and the confirm button says how many it is about to remove. A tick
+  does not open the row's detail: the two gestures are deliberately separate and
+  the row click handler checks for the box first, so one click cannot do both.
+  `POST /api/skills/delete-many` takes `{"names":[…]}` and answers with what went
+  and what did not (`deleted` / `failed` plus the totals), so a batch that
+  half-succeeded reports exactly that instead of reading "ok" or "error". It owns
+  no rules of its own: it forwards one name at a time to the existing
+  single-delete function, which re-checks every guard (legal name, folder
+  present, SKILL.md there) per entry — so a name that does not exist, or a folder
+  that is not a skill, is refused on its own and cannot take the valid entries
+  down with it. More than 200 names is refused before anything is touched, and a
+  `names` that is not a non-empty array is a 400 (a bare string, not a
+  one-skill batch).
+- **The batch of names is capped in the server log line** (six names, then
+  "… and N more"). Whoever reads the log wants to know what was asked for, not a
+  kilobyte list — and a 201-name request wrote a 2 KB line that filled the pipe a
+  redirected stdout becomes, blocking the server on its next write until the
+  client timed out. The smoke suite caught it.
 - The rebuilt page around them: a **sidebar** (brand, the two views with the
   skill count, the source directory this page acts on with its count and a copy
   button, 停止服务) beside one content column; a real **skills table** (name /

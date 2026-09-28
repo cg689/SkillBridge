@@ -15,6 +15,7 @@
 #   POST /api/scan-tools  find the agent tools installed here and add the
 #                         missing ones to config.json's targets (additive)
 #   POST /api/skills/delete   remove one skill folder from the source
+#   POST /api/skills/delete-many   remove several skill folders from the source
 #   POST /api/skills/add      install the skills inside an uploaded .zip
 #   POST /api/stop      shut the server down
 #
@@ -321,6 +322,33 @@ function Read-JsonField {
     return ([string]$prop.Value).Trim()
 }
 
+function Read-JsonNamesField {
+    # Reads the "names" array out of a request body, or $null when the field is
+    # missing, is not an array, or holds nothing but blanks — the caller answers
+    # 400 rather than guessing what was meant. Unary comma on the way out,
+    # because PowerShell flattens a returned one-element array into a plain
+    # string and the caller would then count characters.
+    param([byte[]]$Body)
+    if ($null -eq $Body -or $Body.Length -eq 0) { return $null }
+    try {
+        $obj = [Text.Encoding]::UTF8.GetString($Body) | ConvertFrom-Json
+    } catch { return $null }
+    if ($null -eq $obj) { return $null }
+    $prop = $obj.PSObject.Properties['names']
+    if ($null -eq $prop -or $null -eq $prop.Value) { return $null }
+    # A JSON string also lands here as a single value; only a real array counts,
+    # so "names": "demo-skill" is a 400 and not a one-skill batch.
+    if ($prop.Value -isnot [array]) { return $null }
+    $out = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($n in @($prop.Value)) {
+        if ($null -eq $n) { continue }
+        $s = ([string]$n).Trim()
+        if ($s) { $out.Add($s) }
+    }
+    if ($out.Count -eq 0) { return $null }
+    return , [string[]]$out.ToArray()
+}
+
 function Read-Base64Field {
     # Reads the "data" field (a base64 zip) out of the request body, or $null
     # when it is missing or not valid base64. $null is the only "no" this
@@ -483,6 +511,43 @@ function Handle-Request {
                 Write-ServerLine ("deleted {0}: {1} files, {2:N0} bytes" -f $result.name, $result.files, $result.size) 'Green'
             } else {
                 Write-ServerLine ("delete refused ({0}): {1}" -f $name, $result.error) 'Red'
+            }
+            Send-Json -Context $req -Value $result
+            return
+        }
+        '^/api/skills/delete-many$' {
+            # The batch form of the route above, for the ticked rows in the
+            # skill browser. Same guard, same "no undo", same shape of answer —
+            # only the number of folders differs. common.psm1 re-checks every
+            # name on its own, so a request that lists a skill that does not
+            # exist cannot take the valid ones down with it.
+            if ($req.method -ne 'POST') {
+                Send-Json -Context $req -Code 405 -Value @{ error = 'POST only' }
+                return
+            }
+            $names = Read-JsonNamesField -Body $req.body
+            if ($null -eq $names -or $names.Count -eq 0) {
+                Send-Json -Context $req -Code 400 -Value @{ error = 'send JSON with a non-empty "names" array' }
+                return
+            }
+            # The names are capped in the log line on purpose. Whoever reads this
+            # log wants to know what was asked for, not to receive a kilobyte
+            # list - and a caller that sends 201 names would otherwise produce a
+            # 2 KB line, which fills the pipe a test (or a supervisor) redirects
+            # stdout into and blocks the server on its next write.
+            $shown = @($names | Select-Object -First 6) -join ', '
+            if (@($names).Count -gt 6) { $shown = "$shown, … and $( @($names).Count - 6 ) more" }
+            Write-ServerLine ("delete requested: {0} skills ({1})" -f @($names).Count, $shown) 'Yellow'
+            $result = Remove-SkillBridgeSkills -Names $names -ConfigPath $ConfigPath
+            if ($result.ok) {
+                Write-ServerLine ("deleted {0} skills: {1} files, {2:N0} bytes" -f
+                    $result.deleted.Count, $result.files, $result.size) 'Green'
+            } else {
+                Write-ServerLine ("batch delete not clean: {0}" -f $result.error) 'Red'
+                foreach ($f in @($result.failed)) {
+                    Write-ServerLine ("  refused ({0}): {1}" -f $f.name, $f.error) 'Red'
+                }
+                foreach ($d in @($result.deleted)) { Write-ServerLine ("  deleted {0}" -f $d.name) 'Green' }
             }
             Send-Json -Context $req -Value $result
             return

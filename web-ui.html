@@ -516,7 +516,9 @@
   .skills-tools .field { flex: 0 1 300px; }
   .skills-tools .count { color: var(--text-3); font-size: 11.8px; font-variant-numeric: tabular-nums; }
 
-  .skills-table { --cols: minmax(150px, 1.1fr) minmax(0, 2.2fr) 92px 72px 104px 30px; }
+  /* The first column is the tick box that makes multi-select possible: one
+     grid track for it, so every row and the header stay aligned. */
+  .skills-table { --cols: 26px minmax(150px, 1.1fr) minmax(0, 2.2fr) 92px 72px 104px 30px; }
   .skills-thead {
     display: grid; grid-template-columns: var(--cols); gap: 10px; align-items: center;
     padding: 0 16px; height: 32px; border-bottom: 1px solid var(--line);
@@ -595,6 +597,42 @@
   .skill-row:hover .row-del, .row-del:focus-visible, .skill-row.open .row-del { opacity: 1; }
   .row-del:hover { color: var(--danger-text); background: var(--danger-soft); border-color: var(--danger-line); }
   @media (hover: none) { .row-del { opacity: 1; } }
+
+  /* ---------------------------------------------------------- multi-select */
+  /* Ticking a box is a second, separate gesture from opening the row's detail,
+     so the box is its own focusable control inside the row - never a click
+     handler on the row, which already means "show me what this skill is". */
+  .cell-sel { display: flex; align-items: center; justify-content: center; min-width: 0; }
+  .cell-sel input, .th-check input {
+    flex: none; width: 14px; height: 14px; margin: 0; padding: 0;
+    accent-color: var(--brand); cursor: pointer;
+  }
+  .th-check { justify-self: center; display: flex; }
+  .skill-row.picked { background: var(--brand-soft); }
+  .skill-row.picked:hover { background: var(--brand-soft); }
+  /* The bar that replaces the filter row's right-hand side once something is
+     ticked: it is the only place the batch delete lives, so being tinted is
+     the signal that what is selected is about to have an effect. */
+  .skills-selbar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 9px 16px; border-bottom: 1px solid var(--line);
+    background: var(--brand-soft);
+    font-size: 12.3px; color: var(--text-2);
+  }
+  .skills-selbar[hidden] { display: none; }
+  .sel-count { color: var(--brand-text); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .sel-total { color: var(--text-3); font-size: 11.8px; font-variant-numeric: tabular-nums; }
+
+  .del-names {
+    max-height: 168px; overflow: auto; margin: 10px 0 0; padding: 8px;
+    display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2);
+  }
+  .del-names[hidden] { display: none; }
+  .del-names code {
+    font-family: var(--font-mono); font-size: 11.3px; color: var(--text-2);
+    padding: 2px 7px; border-radius: 5px; background: var(--surface); border: 1px solid var(--line);
+  }
 
   .skill-detail { overflow: hidden; padding: 0 16px 16px; border-bottom: 1px solid var(--line); }
   .skill-detail[hidden] { display: none; }
@@ -783,7 +821,7 @@
     .src-card, .sidebar-foot { display: none; }
     .sidebar-tools { margin-left: auto; }
     .content { padding: 16px 14px 40px; }
-    .skills-table { --cols: minmax(120px, 1fr) minmax(0, 1.6fr) 74px 60px 30px; }
+    .skills-table { --cols: 26px minmax(120px, 1fr) minmax(0, 1.6fr) 74px 60px 30px; }
     .cell-mod { display: none; }
   }
 
@@ -947,8 +985,21 @@
             <span class="grow"></span>
             <span class="count" id="skills-note"></span>
           </div>
+          <!-- Batch actions. Hidden until something is ticked, and listing the
+               chosen names in place: a multi-delete is destructive, so the
+               operator sees exactly what is armed before touching the button
+               that opens the confirmation. -->
+          <div class="skills-selbar" id="skills-selbar" hidden>
+            <span class="sel-count" id="sel-count">已选 0 个</span>
+            <span class="sel-total" id="sel-total"></span>
+            <span class="grow"></span>
+            <button type="button" class="btn sm" id="sel-invert" title="反选当前可见的技能">反选</button>
+            <button type="button" class="btn sm" id="sel-none" title="取消所有选择">取消选择</button>
+            <button type="button" class="btn sm danger" id="sel-delete" title="删除选中的技能（需确认）">删除所选</button>
+          </div>
           <div class="skills-table">
             <div class="skills-thead" id="skills-thead">
+              <div class="th-check"><input type="checkbox" id="skills-check-all" title="全选/取消当前可见的技能" aria-label="全选当前可见的技能"></div>
               <div><button type="button" class="th-sort" data-sort="name" data-active="1" title="按名称排序">名称<span class="th-ic" id="th-ic-name"></span></button></div>
               <div><button type="button" class="th-sort" data-sort="intro" title="按中文简介排序">中文简介<span class="th-ic" id="th-ic-intro"></span></button></div>
               <div class="th-num"><button type="button" class="th-sort" data-sort="coverage" title="按覆盖目标数排序">覆盖<span class="th-ic" id="th-ic-coverage"></span></button></div>
@@ -984,6 +1035,9 @@
     </div>
     <div class="dialog-body">
       <p id="del-desc"></p>
+      <!-- The full list of names, for a batch: an irreversible delete has to be
+           checkable against the table before the button is pressed. -->
+      <ul class="del-names" id="del-names" hidden></ul>
       <ul class="consequences" id="del-effects"></ul>
       <p class="muted" style="margin-top:12px;font-size:12.3px">这一步只删源目录里的文件夹，<b>不会</b>自动同步；删完可以再点「立即同步」把各目标里的残留剪掉。</p>
     </div>
@@ -1401,6 +1455,9 @@
       if (openDialog === id) openDialog = null;
       if (lastFocus && lastFocus.focus) { try { lastFocus.focus({ preventScroll: true }); } catch (e) { } }
       if (id === 'add') addReset();
+      // Armed for a delete, then cancelled with Esc: the selection must not
+      // stay armed behind a closed dialog.
+      if (id === 'del') pendingDeletes = [];
     };
     motionThen(dlg, { opacity: [1, 0], transform: [ 'none', 'translateY(10px) scale(.97)'] }, { duration: 0.18 },
       function () { motionThen(ov, { opacity: [1, 0] }, { duration: 0.16 }, done); });
@@ -1621,7 +1678,11 @@
   var skillState = {
     cat: 'all', q: '', onlyGap: false,
     sortKey: 'name', sortDir: 1,
-    open: {}, loaded: false, loading: false
+    open: {}, loaded: false, loading: false,
+    // name -> true for every ticked row. Kept here rather than read back off
+    // the DOM so the list can be re-sorted, filtered or re-rendered without
+    // losing the selection.
+    sel: {}
   };
   var skillsData = null;
   var modeOf = {};
@@ -1668,9 +1729,13 @@
 
   function skillRow(s) {
     var open = !!skillState.open[s.name];
+    var picked = !!skillState.sel[s.name];
     var total = Math.max(1, covOf(s) + gapOf(s));
     var pct = Math.round(covOf(s) / total * 100);
-    return '<div class="skill-row' + (open ? ' open' : '') + '" data-name="' + esc(s.name) + '">' +
+    return '<div class="skill-row' + (open ? ' open' : '') + (picked ? ' picked' : '') + '" data-name="' + esc(s.name) + '">' +
+      '<label class="cell-sel" title="选择 ' + esc(s.name) + '"><input type="checkbox" class="row-check"' +
+      ' data-check="' + esc(s.name) + '"' + (picked ? ' checked' : '') +
+      ' aria-label="选择 ' + esc(s.name) + '"></label>' +
       '<button type="button" class="cell-name" aria-expanded="' + (open ? 'true' : 'false') + '" aria-controls="sd-' + esc(s.name) + '">' +
       '<span class="skill-caret">' + icon('ChevronRight', 13) + '</span>' +
       '<span class="skill-name">' + esc(s.name) + '</span></button>' +
@@ -1742,6 +1807,10 @@
     if (!rows.length) {
       host.innerHTML = '<div class="empty"><div class="ic">' + icon('SearchX', 26) + '</div>' +
         '<h3>没有匹配的技能</h3><p>换个关键词，或者清除筛选试试。</p></div>';
+      // Nothing visible, so the header box goes empty — but a selection made
+      // under another filter is still armed and the bar keeps saying so.
+      renderSelBar();
+      syncHeadCheck();
       return;
     }
     var html = '';
@@ -1782,6 +1851,83 @@
     }
     host.innerHTML = html;
     enterStagger(Array.prototype.slice.call(host.querySelectorAll('.skill-row')), 0.012);
+    // The bar and the header box describe the VISIBLE rows, so every repaint
+    // (a keystroke in the search box, a sort, a filter) has to restate them.
+    renderSelBar();
+    syncHeadCheck();
+  }
+
+  /* --------------------------------------------------------- multi-select */
+  // The ticked names, in list order, so the bar and the confirmation dialog
+  // read the same way the table does.
+  function selNames() {
+    var list = (skillsData && skillsData.skills) || [];
+    var out = [];
+    for (var i = 0; i < list.length; i++) if (skillState.sel[list[i].name]) out.push(list[i].name);
+    return out;
+  }
+  function rowEl(name) {
+    return document.querySelector('.skill-row[data-name="' + name.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
+  }
+  // One tick applies to its own row only: repainting the list would collapse
+  // every open detail and throw away the scroll position, neither of which the
+  // operator asked for by ticking a box.
+  function selToggle(name, on) {
+    if (on) { skillState.sel[name] = true; } else { delete skillState.sel[name]; }
+    var row = rowEl(name);
+    if (row) row.classList[on ? 'add' : 'remove']('picked');
+    renderSelBar();
+    syncHeadCheck();
+  }
+  // The header box means "every row I can currently see", not "every row there
+  // is": ticking 40 names under a name filter and then 80 more by clearing it
+  // would be a surprise nobody wants from a checkbox.
+  function selAllVisible(on) {
+    var rows = visibleSkills();
+    for (var i = 0; i < rows.length; i++) {
+      if (on) { skillState.sel[rows[i].name] = true; } else { delete skillState.sel[rows[i].name]; }
+    }
+    renderSkills();
+  }
+  function selInvertVisible() {
+    var rows = visibleSkills();
+    for (var i = 0; i < rows.length; i++) {
+      var n = rows[i].name;
+      if (skillState.sel[n]) { delete skillState.sel[n]; } else { skillState.sel[n] = true; }
+    }
+    renderSkills();
+  }
+  function selClear() {
+    skillState.sel = {};
+    renderSkills();
+  }
+  // The header box is three-state on purpose: a checked box that means "some"
+  // would be a lie, and the third state is the only way to say so.
+  function syncHeadCheck() {
+    var head = $('skills-check-all');
+    if (!head) return;
+    var rows = visibleSkills();
+    var picked = 0;
+    for (var i = 0; i < rows.length; i++) if (skillState.sel[rows[i].name]) picked++;
+    head.checked = rows.length > 0 && picked === rows.length;
+    head.indeterminate = picked > 0 && picked < rows.length;
+  }
+  function renderSelBar() {
+    var bar = $('skills-selbar');
+    if (!bar) return;
+    var names = selNames();
+    bar.hidden = names.length === 0;
+    if (!names.length) return;
+    var files = 0, size = 0, gone = 0;
+    for (var i = 0; i < names.length; i++) {
+      var s = findSkill(names[i]);
+      if (!s) { gone++; continue; }
+      files += s.files || 0;
+      size += s.size || 0;
+    }
+    $('sel-count').textContent = '已选 ' + names.length + ' 个技能';
+    $('sel-total').textContent = '共 ' + num(files) + ' 个文件、约 ' + skillSizeText(size) +
+      (gone ? '（其中 ' + gone + ' 个已不在源目录）' : '');
   }
 
   function findSkill(name) {
@@ -1836,8 +1982,13 @@
       skillsData = data;
       skillState.loaded = true;
       // An expanded row is identified by skill name, and reloading the list
-      // replaces every element - so the open set has to start empty.
+      // replaces every element - so the open set has to start empty. A
+      // selection survives a reload on purpose (the operator may have ticked
+      // rows, then hit 重新读取), but only for skills the reload still lists.
       skillState.open = {};
+      var still = {};
+      (data.skills || []).forEach(function (s) { if (skillState.sel[s.name]) still[s.name] = true; });
+      skillState.sel = still;
       modeOf = {};
       (data.targets || []).forEach(function (t) { modeOf[t.name] = t.mode; });
       renderCats();
@@ -1982,51 +2133,106 @@
   }
 
   /* --------------------------------------------------------- skill delete */
-  var pendingDelete = null;
-  function askDeleteSkill(name) {
-    var s = findSkill(name);
-    pendingDelete = name;
-    $('del-sub').textContent = name;
+  // Both entry points (the row's trash can, the bar's 删除所选) arm the same
+  // dialog with a LIST of names, so the single case is just the length-1 case
+  // and there is one delete path to reason about, not two.
+  var pendingDeletes = [];
+  function askDeleteSkill(name) { askDeleteSkills([name]); }
+  function askDeleteSkills(names) {
+    var list = [];
+    for (var i = 0; i < (names || []).length; i++) if (names[i]) list.push(names[i]);
+    if (!list.length) return;
+    pendingDeletes = list;
+    var many = list.length > 1;
+    var files = 0, size = 0;
+    for (var j = 0; j < list.length; j++) {
+      var s = findSkill(list[j]);
+      if (s) { files += s.files || 0; size += s.size || 0; }
+    }
+    $('del-title').textContent = many ? ('删除 ' + list.length + ' 个技能') : '删除技能';
+    $('del-sub').textContent = many ? (list.length + ' 个技能') : list[0];
     // The absolute folder, not just the skill name: this delete is irreversible
     // and it happens inside the source directory every tool reads from, so the
     // operator gets to see exactly which path is about to lose its folder.
-    $('del-desc').innerHTML = '将删除 <code>' + esc(s && s.path ? s.path : name) + '</code>' +
-      (s ? '（' + esc(num(s.files)) + ' 个文件、约 ' + esc(skillSizeText(s.size)) + '）' : '') + '。删除后无法撤销。';
-    var eff = [];
-    eff.push({ ic: 'FolderOpen', txt: '<b>' + esc(name) + '</b> 从技能源目录永久移除' });
-    if (s && gapOf(s) > 0) {
-      eff.push({ ic: 'Link2', txt: '它还有 ' + gapOf(s) + ' 个同步目标没收到过，删除不会影响到它们' });
+    var one = list[0];
+    var oneSkill = findSkill(one);
+    $('del-desc').innerHTML = many
+      ? '将从源目录永久移除 <code>' + esc((skillsData && skillsData.source) || '') + '</code> 下的 ' +
+        '<b>' + list.length + '</b> 个技能文件夹，共 <b>' + esc(num(files)) + '</b> 个文件、约 <b>' +
+        esc(skillSizeText(size)) + '</b>。删除后无法撤销。'
+      : '将删除 <code>' + esc(oneSkill && oneSkill.path ? oneSkill.path : one) + '</code>' +
+        (oneSkill ? '（' + esc(num(oneSkill.files)) + ' 个文件、约 ' + esc(skillSizeText(oneSkill.size)) + '）' : '') +
+        '。删除后无法撤销。';
+    var namesEl = $('del-names');
+    if (many) {
+      namesEl.hidden = false;
+      namesEl.innerHTML = list.map(function (n) { return '<code>' + esc(n) + '</code>'; }).join('');
     } else {
-      eff.push({ ic: 'Link2', txt: '各同步目标里的同名链接会变成残留，下一次「立即同步」时剪除' });
+      namesEl.hidden = true;
+      namesEl.innerHTML = '';
     }
-    if (s && (s.blocked || []).length) {
-      eff.push({ ic: 'Unplug', txt: '有 ' + (s.blocked || []).length + ' 个目标因为工具占用同名目录，从未同步过它' });
+    var eff = [];
+    if (many) {
+      eff.push({ ic: 'FolderOpen', txt: '<b>' + esc(list.length) + '</b> 个文件夹从技能源目录永久移除' });
+      eff.push({ ic: 'ListChecks', txt: '上面列出的就是全部将被删除的技能；同步目标里的同名条目会在下一次「立即同步」时剪除' });
+    } else {
+      eff.push({ ic: 'FolderOpen', txt: '<b>' + esc(one) + '</b> 从技能源目录永久移除' });
+      if (oneSkill && gapOf(oneSkill) > 0) {
+        eff.push({ ic: 'Link2', txt: '它还有 ' + gapOf(oneSkill) + ' 个同步目标没收到过，删除不会影响到它们' });
+      } else {
+        eff.push({ ic: 'Link2', txt: '各同步目标里的同名链接会变成残留，下一次「立即同步」时剪除' });
+      }
+      if (oneSkill && (oneSkill.blocked || []).length) {
+        eff.push({ ic: 'Unplug', txt: '有 ' + (oneSkill.blocked || []).length + ' 个目标因为工具占用同名目录，从未同步过它' });
+      }
     }
-    eff.push({ ic: 'ShieldCheck', txt: '只删这一个文件夹：其他技能、工具自己的技能目录都不动' });
+    eff.push({ ic: 'ShieldCheck', txt: '只删这些文件夹：其他技能、工具自己的技能目录都不动' });
     $('del-effects').innerHTML = eff.map(function (e) {
       return '<li>' + icon(e.ic, 14) + '<span>' + e.txt + '</span></li>';
     }).join('');
+    $('del-confirm').textContent = many ? ('删除 ' + list.length + ' 个技能') : '确认删除';
     $('del-note').textContent = '此操作不可恢复';
     dialogOpen('del');
   }
   function runDeleteSkill() {
-    if (!pendingDelete) return;
-    var name = pendingDelete;
+    if (!pendingDeletes.length) return;
+    var names = pendingDeletes;
+    var one = names.length === 1;
     Busy($('del-confirm'), true);
-    $('del-note').textContent = '正在删除…';
-    api('/api/skills/delete', { method: 'POST', json: { by: 'ui', name: name } }, function (data) {
-      Busy($('del-confirm'), false);
-      if (data && data.ok) {
-        dialogClose('del');
-        toast('ok', '已删除 ' + name, '释放 ' + skillSizeText(data.size) + '（' + num(data.files) + ' 个文件）。');
-        pendingDelete = null;
-        loadSkills(true);
-        refresh();
-      } else {
-        $('del-note').textContent = (data && data.error) || '删除失败';
-        toast('fail', '删除失败', (data && data.error) || '');
-      }
-    });
+    $('del-note').textContent = one ? '正在删除…' : ('正在删除 ' + names.length + ' 个技能…');
+    api(one ? '/api/skills/delete' : '/api/skills/delete-many',
+      { method: 'POST', json: one ? { by: 'ui', name: names[0] } : { by: 'ui', names: names } },
+      function (data) {
+        Busy($('del-confirm'), false);
+        if (data && data.ok) {
+          dialogClose('del');
+          toast('ok', one ? ('已删除 ' + names[0]) : ('已删除 ' + names.length + ' 个技能'),
+            '释放 ' + skillSizeText(data.size) + '（' + num(data.files) + ' 个文件）。');
+          skillState.sel = {};
+          pendingDeletes = [];
+          loadSkills(true);
+          refresh();
+        } else {
+          // A batch can half-succeed. That is neither a success nor a plain
+          // failure, so the dialog stays open and says which names still stand
+          // and why, instead of closing on the operator and hiding the detail.
+          var msg = (data && data.error) || '删除失败';
+          var bad = (data && data.failed) || [];
+          if (bad.length) {
+            msg += '：' + bad.map(function (f) { return esc(f.name) + '（' + esc(f.error || '') + '）'; }).join('；');
+          }
+          $('del-note').textContent = msg;
+          var done = (data && data.deleted) || [];
+          toast(bad.length && done.length ? 'warn' : 'fail',
+            one ? '删除失败' : ('已删除 ' + done.length + ' 个，' + bad.length + ' 个未删除'),
+            bad.length ? bad.map(function (f) { return f.name + '：' + (f.error || ''); }).join('；') : msg);
+          // Whatever did go through must not stay ticked: the list is about to
+          // be re-read, and a selection pointing at a deleted name is a trap.
+          for (var i = 0; i < done.length; i++) delete skillState.sel[done[i].name];
+          loadSkills(true);
+          refresh();
+        }
+      });
   }
 
   /* ----------------------------------------------------------- add a skill */
@@ -2271,6 +2477,13 @@
           askDeleteSkill(t.getAttribute('data-del'));
           return;
         }
+        // A tick is not a request to open the row's detail, even though the box
+        // sits inside the row: check it before the row handler below can see
+        // the bubbled click.
+        if (t.getAttribute && t.getAttribute('data-check')) {
+          selToggle(t.getAttribute('data-check'), !!t.checked);
+          return;
+        }
         if (t.classList && t.classList.contains('skill-group-head')) {
           var g = t.parentNode;
           g.classList[g.classList.contains('collapsed') ? 'remove' : 'add']('collapsed');
@@ -2319,6 +2532,13 @@
       this.setAttribute('aria-pressed', skillState.onlyGap ? 'true' : 'false');
       renderSkills();
     };
+
+    // The header box selects what is visible; the bar's buttons work on the
+    // same set, so "反选" cannot silently drop a row the filter is hiding.
+    $('skills-check-all').onchange = function () { selAllVisible(!!this.checked); };
+    $('sel-invert').onclick = function () { selInvertVisible(); };
+    $('sel-none').onclick = function () { selClear(); };
+    $('sel-delete').onclick = function () { askDeleteSkills(selNames()); };
 
     $('del-cancel').onclick = function () { dialogClose('del'); };
     $('del-close').onclick = function () { dialogClose('del'); };

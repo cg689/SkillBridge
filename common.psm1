@@ -864,6 +864,69 @@ function Remove-SkillBridgeSkill {
     return [pscustomobject]$result
 }
 
+# Deleting several skills at once is the same operation repeated, and the point
+# of repeating it is that it stays exactly as strict as the single case: this
+# function owns no rules of its own, it forwards one name at a time to
+# Remove-SkillBridgeSkill, which re-checks every guard (legal name, the folder
+# is there, it really has a SKILL.md) for every entry. A batch is also the
+# easiest place to empty the whole library with one bad request, so the size is
+# capped — the source holds ~120 skills today, and a caller asking for more than
+# that is either broken or making a decision that deserves the shell. A refusal
+# never stops the run: the caller gets told which N of M went through, because
+# "one of them did not" is not an answer anyone can act on.
+function Remove-SkillBridgeSkills {
+    param(
+        [string[]]$Names,
+        [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json')
+    )
+    $MaxBatch = 200
+    $result = [ordered]@{
+        ok        = $false
+        requested = 0
+        deleted   = @()
+        failed    = @()
+        files     = 0
+        size      = [long]0
+        error     = ''
+    }
+    $asked = @($Names | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { ([string]$_).Trim() })
+    $result.requested = $asked.Count
+    if ($asked.Count -eq 0) {
+        $result.error = 'no skill names given'
+        return [pscustomobject]$result
+    }
+    if ($asked.Count -gt $MaxBatch) {
+        $result.error = "too many at once: $($asked.Count) (limit $MaxBatch)"
+        return [pscustomobject]$result
+    }
+    # Windows names are case-insensitive, and deleting Demo twice would make the
+    # second attempt fail with "no such skill" — a confusing half-success that is
+    # only ever a doubled request. Same name, one attempt.
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($n in $asked) { [void]$seen.Add($n) }
+    foreach ($n in $seen) {
+        $one = Remove-SkillBridgeSkill -Name $n -ConfigPath $ConfigPath
+        if ($one.ok) {
+            $result.deleted += [pscustomobject]@{ name = $one.name; files = $one.files; size = $one.size }
+            $result.files += [int]$one.files
+            $result.size  += [long]$one.size
+        } else {
+            $result.failed += [pscustomobject]@{ name = $one.name; error = $one.error }
+        }
+    }
+    $result.ok = (@($result.failed).Count -eq 0 -and @($result.deleted).Count -gt 0)
+    if (-not $result.ok) {
+        $result.error = if (@($result.failed).Count -gt 0 -and @($result.deleted).Count -gt 0) {
+            "deleted $($result.deleted.Count), refused $($result.failed.Count)"
+        } elseif (@($result.failed).Count -gt 0) {
+            "refused all $($result.failed.Count)"
+        } else {
+            'nothing was deleted'
+        }
+    }
+    return [pscustomobject]$result
+}
+
 function Import-ZipSupport {
     # Makes [IO.Compression.ZipFile] usable and says whether it worked.
     # [Reflection.Assembly]::Load() only searches the GAC, and this assembly is

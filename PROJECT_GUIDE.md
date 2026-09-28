@@ -77,6 +77,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\web-ui.ps1 -NoBrowser
 - 任何行为改动都要落到 `tests/smoke-windows.ps1` 或 `tests/smoke-webui.ps1` 的真实断言里（后者会自己起服务、造夹具源目录，跑之前不用停用户的实例）。
 - 新工具进 `supported-tools.json` 时，`config.example.json` 和 `支持的软件列表.md` 必须同步，否则 `test-catalog.py` 失败。
 - 页面 JS 有改：跑 `python scanjs.py`（`node --check` + 未声明调用 + 图标名）。
+- 页面结构断言要能真的失败：改完拿改动前的判断标准反向验一次（比如把拦截分支挪个顺序，看断言是否报错），别写出恒真的 `-match '.'`。
+- **别让服务端往 stdout 写长行**：`smoke-webui.ps1` 用 `RedirectStandardOutput` 把 web-ui.ps1 的输出接进管道，而 PowerShell 不会提前读它。管道缓冲区只有几 KB，一旦写满，单线程的服务端就阻塞在写日志上，此后的每个请求都要等客户端 180 秒超时（症状是 HTTP -1，服务端却毫发无损）。所以批量操作打日志只打计数和前几个名字。
 - 两个平台的同步语义必须一起改（`.sh` ↔ `.ps1`），冒烟要覆盖同一条规则。
 - **归属看"落点"不看"拼写"**：链接字面写的路径可以早就失效（CC Switch 的仓库从 C: 搬到 D:，`~/.cc-switch/skills` 里遗留的旧拼写链接依然通过中间 junction 落在源目录里）。先按字面前缀比，比不赢再把两边都跟完联接解析一次（`Get-ResolvedPath` / `resolves_into`）。只看字面会把源目录和自己的链接判成两家，症状就是某目标显示 `0/123, 缺 123, 死链 N` 而里面躺着一整排能用的链接。真实目录仍然是工具自己的，链接解析到源目录外面的一律不是我们的。
 - `smoke-unix.sh` 在 Windows 的 Git Bash 里要这样才跑得动（Linux 上直接跑）：`python3` 在这台机器是 WindowsApps 的假存根（退出 49），需要 PATH 前挂一个真 python；`TMPDIR` 不能指向会被 MSYS 重映射的目录（Windows 临时目录会被另看成 `/tmp`，符号链接往返后拼写对不上），也不能用 `/tmp`（本机有外部进程在清它）；`MSYS=winsymlinks:nativestrict`，否则 `ln -s` 悄悄退化成复制目录。`detect-tools` 那段会读仓库里真实的 `config.json`（本机是 Windows 设置 `junction`），所以最后一条断言在本机必然失败，与脚本无关。
