@@ -405,6 +405,23 @@ try {
         throw 'FAIL: -DryRun registered a task'
     }
     Write-Host 'OK: install-autolink -DryRun is side-effect free'
+
+    # Same trap for the dashboard autostart installer: its real job is
+    # Register-ScheduledTask, so -DryRun must preview and register nothing.
+    $dryUi = & (Join-Path $root 'install-webui.ps1') -DryRun -TaskName 'SB-WebUI-DryRun-Probe' 6>&1 | Out-String
+    if ([string]::IsNullOrWhiteSpace($dryUi)) {
+        throw 'FAIL: install-webui -DryRun produced no capturable output (assertion would be vacuous)'
+    }
+    if ($dryUi -notmatch 'DRY-RUN') {
+        throw "FAIL: install-webui -DryRun did not report DRY-RUN (got: $dryUi)"
+    }
+    if ($dryUi -match 'Registered task') {
+        throw "FAIL: install-webui -DryRun took the register path (got: $dryUi)"
+    }
+    if (Get-ScheduledTask -TaskName 'SB-WebUI-DryRun-Probe' -ErrorAction SilentlyContinue) {
+        throw 'FAIL: install-webui -DryRun registered a task'
+    }
+    Write-Host 'OK: install-webui -DryRun is side-effect free'
 } finally {
     # restore repo config.json / log / run-status file, byte-identical
     if ($null -ne $cfgBackup) {
