@@ -255,6 +255,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tokens matches the file.
 
 ### Changed
+- **The dashboard page was restyled from the components up**, against shadcn/ui's
+  published design system (its new-york style, Tailwind v4) taken as a
+  *reference*, not as a dependency — this page has no build step, no CDN and no
+  network, so the values were read off shadcn's own component definitions and
+  written straight into the stylesheet. The button is its button (36 px tall,
+  `gap-2`, `rounded-md`, `text-sm`, `font-medium`, a 3 px ring on
+  `:focus-visible`, `[&_svg]:size-4` for the icon inside, and its four sizes);
+  the cards are its cards (`rounded-xl`, `bg-card`, `shadow-sm`); the badges are
+  pills (`rounded-full`, `px-2`, `py-0.5`, `text-xs`); the table header is 40 px
+  with rows that answer `hover` and a selected row that keeps a tint; the inputs
+  are 36 px with the 3 px focus ring; the switch is its 32×18 track with a 14 px
+  thumb; the dialogs are its overlay-plus-content pair (overlay at 50% black,
+  content centred, `rounded-lg`, `p-6`, `shadow-lg`, animating in at
+  `zoom-in-95` + a 2-unit rise and out faster than in). The toasts are
+  shadcn/sonner's: 356 px wide, `.5rem` from the edge, its radius, its 16 px
+  icons, its 24 px slide. Every value that came out of shadcn in `oklch()` is
+  written as hex, because the page has to run on Edge builds that predate
+  `oklch()` and would otherwise paint nothing at all. The palettes are still one
+  stylesheet with two themes, but the two blocks now answer the **same 52 token
+  names** — that is what the new smoke assertion enforces, because a name only
+  one theme defines is invisible until one control renders in the browser's
+  default grey.
+- **The skill table's column header now scrolls with the rows and parks on top
+  of them**, instead of sitting outside the scroller and scrolling away with the
+  card. With 100+ rows the labels drifted off with it, which turned half the
+  columns into numbers with nothing over them. Parking the header inside the
+  scroller also gives it somewhere to cast its shadow: rows passing under it are
+  now separated by a drop shadow on the light palette and an inset line on the
+  dark one, because a black shadow over black rows cannot be seen. The per-
+  category bars park directly beneath it (offset by the header's own height,
+  named once as `--thead-h`) so a bar leaving its own group slides out of sight
+  *behind* the header rather than showing a half-cut sliver between the two —
+  which is what happened before, at every scroll position where a group ended
+  near the top. In the narrow layout the 改动 column and its sort button are now
+  hidden together, so the header no longer shows a control that sorts a column
+  nobody can see, and its labels no longer wrap to two lines in a 60 px column.
+- `tests/smoke-webui.ps1` carries the guards for all of the above: the two theme
+  blocks must answer the same token names; `#skills-thead` must sit inside
+  `#skills-scroll`, be `position: sticky`, and be styled while rows pass under
+  it **in both themes**; the category bars must park under it by
+  `top: var(--thead-h)`; the narrow layout must hide `.cell-mod` and `.th-mod`
+  together; every id `paintStaticIcons` writes into must exist in the markup (a
+  typo there is invisible — the loop skips what it cannot find and the icon slot
+  just stays empty); and the number of sort buttons must match the number of
+  icon slots they own. `tests/mutate-restyle.py` runs each of those assertions
+  against a deliberately broken copy of the page: it mutates the page ten ways,
+  expects the suite to fail every time, and restores the page byte-for-byte —
+  all ten mutations are currently caught.
+- Dead rules left over from the rewritten stylesheet are gone (four button
+  variants nothing used, one of them a `.btn.link` that had no button on the
+  page), and the buttons section now documents only the variants that exist.
 - `scanjs.py` also checks every icon name the page asks for against the names
   the vendored Lucide bundle actually exports — a misspelling renders an empty
   box, which is the same class of bug the `#i-chevron` guard exists for — and

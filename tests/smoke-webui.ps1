@@ -515,6 +515,110 @@ try {
         throw 'FAIL: the scan result card sits below the 同步目标 grid instead of near the 扫描工具 button'
     }
 
+    # -- the palette: one set of names, two themes ---------------------------
+    # The two theme blocks are the whole palette, and everything else in the
+    # stylesheet asks them by semantic name. A name that only one block answers
+    # is the classic way to get a light theme where one control silently falls
+    # back to the browser's default colour - nothing in the page can see it,
+    # because the page only ever says var(--name).
+    $darkBlock = [regex]::Match($page.text, ':root\s*\{[^}]*\}').Value
+    $lightBlock = [regex]::Match($page.text, 'html\[data-theme="light"\]\s*\{[^}]*\}').Value
+    if ($darkBlock.Length -lt 400 -or $lightBlock.Length -lt 400) {
+        throw "FAIL: a theme token block is missing or truncated (dark $($darkBlock.Length) chars, light $($lightBlock.Length) chars)"
+    }
+    $darkNames = @([regex]::Matches($darkBlock, '--[a-z0-9-]+(?=\s*:)') | ForEach-Object { $_.Value })
+    $lightNames = @([regex]::Matches($lightBlock, '--[a-z0-9-]+(?=\s*:)') | ForEach-Object { $_.Value })
+    if ($darkNames.Count -lt 40) {
+        throw "FAIL: the dark theme block defines only $($darkNames.Count) tokens - the palette looks half-copied"
+    }
+    $onlyDark = @($darkNames | Where-Object { $lightNames -notcontains $_ })
+    $onlyLight = @($lightNames | Where-Object { $darkNames -notcontains $_ })
+    if ($onlyDark.Count -or $onlyLight.Count) {
+        throw ("FAIL: the two theme blocks do not answer the same names " +
+               "(only dark: $($onlyDark -join ', '); only light: $($onlyLight -join ', '))" +
+               ' - one theme is missing tokens the other one defines')
+    }
+
+    # -- the skill table header: sticky inside its own scroller --------------
+    # The column header scrolls with the rows and parks itself on top of them,
+    # so the labels stay readable however far the list goes. That only happens
+    # if the header sits INSIDE the scroller: outside it, the header scrolls
+    # away with the rest of the card, and the shadow that is meant to say
+    # "rows are passing under this" ends up casting onto empty space.
+    if ($page.text -notmatch 'id="skills-scroll"') {
+        throw 'FAIL: the skills table has no #skills-scroll, so the column header has nothing to stick inside'
+    }
+    if ($page.text -notmatch '\.skills-thead\s*\{[^}]*position:\s*sticky') {
+        throw 'FAIL: .skills-thead does not stick, so the column labels scroll away with the rows'
+    }
+    if ($page.text.IndexOf('id="skills-scroll"') -gt $page.text.IndexOf('id="skills-thead"')) {
+        throw 'FAIL: #skills-thead is not inside #skills-scroll, so the header cannot park over the rows'
+    }
+    if ($page.text.IndexOf('id="skills-thead"') -gt $page.text.IndexOf('id="skills-list"')) {
+        throw 'FAIL: the row list does not follow the header inside the scroller, so a repaint would eat the header'
+    }
+    # The scroller is the only element that knows rows are passing under the
+    # header, so it is the only one that can switch the shadow on.
+    # The scroller is the only element that knows rows are passing under the
+    # header, so it is the only one that can switch that cue on. Two rules are
+    # needed, not one: the drop shadow does the work on the light palette and
+    # the inset line does it on the dark one, where a black shadow over black
+    # rows is invisible.
+    $shadowRules = @([regex]::Matches($page.text, '\.skills-thead\.scrolled\s*\{'))
+    if ($shadowRules.Count -lt 2) {
+        throw "FAIL: only $($shadowRules.Count) of the two themes style the header while rows pass under it, so on one palette a moving header reads as a static bar"
+    }
+    # Backtick, or PowerShell interpolates $( ) inside a double-quoted string and
+    # looks for a literal that was never written.
+    if ($page.text -notmatch [regex]::Escape("`$('skills-scroll')")) {
+        throw 'FAIL: nothing reads #skills-scroll, so the header shadow is never switched on'
+    }
+    # The category bars park directly under the column header. Without that
+    # offset they share a line with it, and a bar leaving its own group shows a
+    # half-cut sliver between the two instead of sliding out behind the header.
+    if ($page.text -notmatch '--thead-h\s*:') {
+        throw 'FAIL: the header height is not a named value, so the category bars have nothing to park under'
+    }
+    if ($page.text -notmatch 'top:\s*var\(--thead-h\)') {
+        throw 'FAIL: the category bars do not park under the column header (no top: var(--thead-h)), so they collide with it'
+    }
+    # The narrow layout drops the 改动 column; its sort button has to go with
+    # it, or the header shows a control that sorts a column nobody can see.
+    if ($page.text -notmatch '\.cell-mod,\s*\.th-mod\s*\{\s*display:\s*none') {
+        throw 'FAIL: the narrow layout hides the 改动 cells but not its sort button'
+    }
+
+    # -- the icons the page paints once, by id -------------------------------
+    # paintStaticIcons fills icon-only slots from the vendored Lucide data, and
+    # skips whatever it cannot find. A typo in one of those ids is therefore
+    # invisible at runtime: the slot just stays empty. The only way to catch it
+    # is to read the ids the painter names and check the page ships them.
+    $iconIds = @()
+    $atBlock = [regex]::Match($page.text, 'var at = \{[\s\S]*?\};').Value
+    $iconIds += @([regex]::Matches($atBlock, "'([a-z0-9-]+)':\s*'[A-Z]") | ForEach-Object { $_.Groups[1].Value })
+    $headBlock = [regex]::Match($page.text, 'var heads = \[[^\]]*\]').Value
+    $iconIds += @([regex]::Matches($headBlock, "'(th-ic-[a-z]+)'") | ForEach-Object { $_.Groups[1].Value })
+    $spinBlock = [regex]::Match($page.text, 'var spinners = \[[^\]]*\]').Value
+    $iconIds += @([regex]::Matches($spinBlock, "'(spin-[a-z]+)'") | ForEach-Object { $_.Groups[1].Value })
+    if ($iconIds.Count -lt 25) {
+        throw "FAIL: paintStaticIcons lists only $($iconIds.Count) icon slots - the painter looks half-written"
+    }
+    foreach ($slot in $iconIds) {
+        if ($page.text -notmatch [regex]::Escape("id=""$slot""")) {
+            throw "FAIL: paintStaticIcons writes an icon into #$slot, which the page does not ship"
+        }
+    }
+    # ... and every sort button owns one of the slots it fills. A button with no
+    # slot looks inert; a slot with no button never gets painted at all.
+    $sortButtons = @([regex]::Matches($page.text, '<button type="button" class="th-sort"'))
+    $thSlots = @([regex]::Matches($page.text, 'class="th-ic"'))
+    if ($sortButtons.Count -lt 5) {
+        throw "FAIL: the skill table header has only $($sortButtons.Count) sort buttons"
+    }
+    if ($sortButtons.Count -ne $thSlots.Count) {
+        throw "FAIL: $($sortButtons.Count) sort buttons against $($thSlots.Count) icon slots - the header and the icon painter disagree"
+    }
+
     # -- no token, no API -----------------------------------------------------
     foreach ($m in @(
         @{ m = 'GET';  p = 'api/status' },
