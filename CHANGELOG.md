@@ -269,8 +269,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thumb; the dialogs are its overlay-plus-content pair (overlay at 50% black,
   content centred, `rounded-lg`, `p-6`, `shadow-lg`, animating in at
   `zoom-in-95` + a 2-unit rise and out faster than in). The toasts are
-  shadcn/sonner's: 356 px wide, `.5rem` from the edge, its radius, its 16 px
-  icons, its 24 px slide. Every value that came out of shadcn in `oklch()` is
+  shadcn/sonner's: 356 px wide, 24 px from the edge — 16 px in the narrow
+  layout — its radius, its 16 px icons, its 24 px slide. Every value that came
+  out of shadcn in `oklch()` is
   written as hex, because the page has to run on Edge builds that predate
   `oklch()` and would otherwise paint nothing at all. The palettes are still one
   stylesheet with two themes, but the two blocks now answer the **same 52 token
@@ -292,20 +293,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hidden together, so the header no longer shows a control that sorts a column
   nobody can see, and its labels no longer wrap to two lines in a 60 px column.
 - `tests/smoke-webui.ps1` carries the guards for all of the above: the two theme
-  blocks must answer the same token names; `#skills-thead` must sit inside
-  `#skills-scroll`, be `position: sticky`, and be styled while rows pass under
-  it **in both themes**; the category bars must park under it by
-  `top: var(--thead-h)`; the narrow layout must hide `.cell-mod` and `.th-mod`
-  together; every id `paintStaticIcons` writes into must exist in the markup (a
-  typo there is invisible — the loop skips what it cannot find and the icon slot
-  just stays empty); and the number of sort buttons must match the number of
-  icon slots they own. `tests/mutate-restyle.py` runs each of those assertions
-  against a deliberately broken copy of the page: it mutates the page ten ways,
-  expects the suite to fail every time, and restores the page byte-for-byte —
-  all ten mutations are currently caught.
-- Dead rules left over from the rewritten stylesheet are gone (four button
-  variants nothing used, one of them a `.btn.link` that had no button on the
-  page), and the buttons section now documents only the variants that exist.
+  blocks must answer the same token names; `#skills-thead` must appear inside
+  the `#skills-scroll` markup and ahead of `#skills-list`, be `position: sticky`,
+  and be styled while rows pass under it **in both themes**; the category bars
+  must park under it by `top: var(--thead-h)`; the narrow layout must hide
+  `.cell-mod` and `.th-mod` together; every id `paintStaticIcons` writes into
+  must exist in the markup (a typo there is invisible — the loop skips what it
+  cannot find and the icon slot just stays empty); and the number of sort
+  buttons must match the number of icon slots they own.
+  `tests/mutate-restyle.py` runs each of those assertions against a deliberately
+  broken copy of the page: it mutates the page ten ways, expects the suite to
+  fail every time, and restores the page byte-for-byte — all ten mutations are
+  currently caught. It reports nothing unless the suite first passes on the
+  untouched page, and only credits a mutation when the failure names one of the
+  assertions above, so a server that never started cannot be read as ten catches.
 - `scanjs.py` also checks every icon name the page asks for against the names
   the vendored Lucide bundle actually exports — a misspelling renders an empty
   box, which is the same class of bug the `#i-chevron` guard exists for — and
