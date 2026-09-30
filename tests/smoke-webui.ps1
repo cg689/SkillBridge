@@ -558,8 +558,6 @@ try {
         throw 'FAIL: the row list does not follow the header inside the scroller, so a repaint would eat the header'
     }
     # The scroller is the only element that knows rows are passing under the
-    # header, so it is the only one that can switch the shadow on.
-    # The scroller is the only element that knows rows are passing under the
     # header, so it is the only one that can switch that cue on. Two rules are
     # needed, not one: the drop shadow does the work on the light palette and
     # the inset line does it on the dark one, where a black shadow over black
