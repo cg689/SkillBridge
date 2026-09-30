@@ -11,3 +11,7 @@ Thumbs.db
 
 # Machine-generated run record (last sync outcome, written by sync-skills.*)
 .skillbridge-status.json
+
+# Python bytecode cache (created whenever a test imports another test module)
+__pycache__/
+*.pyc
